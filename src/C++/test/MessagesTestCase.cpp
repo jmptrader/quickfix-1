@@ -45,6 +45,7 @@
 #include <fix42/OrderStatusRequest.h>
 #include <fix42/MassQuote.h>
 #include <fix44/NewOrderCross.h>
+#include <fix44/AllocationInstruction.h>
 
 using namespace FIX;
 using namespace FIX42;
@@ -240,6 +241,21 @@ TEST(setStringWithHeaderGroup)
   CHECK_EQUAL( str, object.toString() );
 }
 
+TEST(setStringWithHeaderGroupDefinedInComponent)
+{
+  FIX::Message object;
+  DataDictionary dataDictionary( "../spec/FIX44.xml" );
+  static const char* str =
+    "8=FIX.4.4\0019=152\00135=A\00134=125\00149=BUYSIDE\001"
+    "52=20040916-16:19:18.328\00156=SELLSIDE\001"
+    "627=2\001628=HOP1\001629=20040916-16:19:18.328\001630=ID1\001"
+    "628=HOP2\001629=20040916-16:19:18.328\001630=ID2\001"
+    "10=080\001";
+
+  object.setString( str, true, &dataDictionary );
+  CHECK_EQUAL( str, object.toString() );
+}
+
 TEST(setStringWithHighBit)
 {
   FIX::Message object;
@@ -263,6 +279,54 @@ TEST(setStringWithHighBit)
 
   object.setString( str, true, &dataDictionary );
   CHECK_EQUAL( str, object.toString() );
+}
+
+TEST(setStringWithDataFieldWithoutDataLength)
+{
+  FIX::Message object;
+  DataDictionary dataDictionary("../spec/FIX42.xml");
+
+  FIX::Headline headline("client");
+  FIX42::News msg(headline);
+
+  std::string s;
+  char cc = -92;
+  int data_len = rand() % 100;
+  s.assign(data_len, cc);
+
+  FIX::RawData data;
+  data.setValue(s);
+
+  msg.set(data);
+  std::string str = msg.toString();
+
+  CHECK_THROW(object.setString(str, true, &dataDictionary), InvalidMessage);
+}
+
+TEST(setStringWithDataFieldAndGarbageAsDataLength)
+{
+  FIX::Message object;
+  DataDictionary dataDictionary("../spec/FIX42.xml");
+
+  FIX::Headline headline("client");
+  FIX42::News msg(headline);
+
+  FIX::RawDataLength data_len;
+  data_len.setString("garbage");
+
+  std::string s;
+  char cc = -92;
+  int length = rand() % 100;
+  s.assign(length, cc);
+
+  FIX::RawData data;
+  data.setValue(s);
+
+  msg.set(data_len);
+  msg.set(data);
+  std::string str = msg.toString();
+
+  CHECK_THROW(object.setString(str, true, &dataDictionary), InvalidMessage);
 }
 
 TEST(copy)
@@ -512,14 +576,6 @@ TEST(addRemoveGroup)
   CHECK_EQUAL( 2lu, object.groupCount(FIX::FIELD::NoOrders) );
   object.getField( noOrders );
   CHECK_EQUAL( 2, noOrders );
-
-  object.removeGroup( group );
-  CHECK( object.hasGroup(1, group) );
-  CHECK( !object.hasGroup(2, group) );
-  CHECK( !object.hasGroup(3, group) );
-  CHECK_EQUAL( 1lu, object.groupCount(FIX::FIELD::NoOrders) );
-  object.getField( noOrders );
-  CHECK_EQUAL( 1, noOrders );
 
   object.removeGroup( group );
   CHECK( !object.hasGroup(1, group) );
@@ -920,6 +976,37 @@ TEST(orderCancelRequestSetString)
   CHECK_EQUAL( '1', object.get( side ) );
 }
 
+TEST(XMLNonFIXSetString)
+{
+  // XMLnonFIX message
+  FIX::Message object;
+
+  DataDictionary dataDictionary( "../spec/FIX42.xml" );
+
+  std::string encodedFIXmessage = "8=FIX.4.2\0019=390\001"
+    "35=8\00134=136\001369=131\00152=20150220-14:40:24.991\00149=CME\00150=G\001"
+    "56=GGGGGGN\00157=GGG\001143=IL\0011=TEST\0016=0\00111=00000000000000000003\001"
+    "14=1\00117=64485:M:412850TN0031303\00120=0\00131=208700\00132=1\00137=64227619161\001"
+    "38=1\00139=2\00140=2\00141=0\00144=208700\00148=147403\00154=1\00155=ES\00159=0\001"
+    "60=20150220-14:40:24.970\00175=20150220\001107=ESH5\001150=2\001151=0\001167=FUT\001"
+    "337=TRADE\001375=CME000A\001432=20150220\001442=1\001527=642276191612015022031303\001"
+    "1028=N\0011057=N\00110=000\001";
+
+  std::string xmlNonFIXMessage = std::string("8=FIX.4.2\0019=501\00135=n\00134=158\001369=130\00152=20150220-14:40:24.991\001"
+    "49=CME\00150=G\00156=QQQQQQN\00157=QQQ\001212=413\001213=") + encodedFIXmessage + std::string("\00110=129\001");
+
+  object.setString( xmlNonFIXMessage, true, &dataDictionary );
+
+  XmlDataLen dataLen;
+  XmlData xmlData;
+
+  object.getHeader().getField( dataLen );
+  object.getHeader().getField( xmlData );
+
+  CHECK_EQUAL( 413, dataLen.getValue() );
+  CHECK_EQUAL( encodedFIXmessage, xmlData.getValue() );
+}
+
 TEST(orderCancelRejectGetString)
 {
   OrderCancelReject object;
@@ -1024,7 +1111,7 @@ TEST(newOrderListSetString)
   FIX42::NewOrderList object;
 
   DataDictionary dataDictionary( "../spec/FIX42.xml" );
-  
+
   object.setString
     ( "8=FIX.4.2\0019=95\00135=E\00166=1\00168=3\00173=3\001"
       "11=A\00154=1\00155=DELL\00167=1\001"
@@ -1152,7 +1239,7 @@ TEST(newOrderCrossGetString)
   noPartyIDs.set( FIX::PartyID("PARTY2") );
   noPartyIDs.set( FIX::PartyIDSource(FIX::PartyIDSource_PROPRIETARY) );
   noPartyIDs.set( FIX::PartyRole(FIX::PartyRole_CLIENT_ID) );
-  
+
   noSides.addGroup( noPartyIDs );
 
   noSides.set( FIX::OrderQty(100) );
@@ -1206,6 +1293,192 @@ TEST(newOrderCrossSetString)
   FIX::OrderQty orderQty;
   noSides.get( orderQty );
   CHECK_EQUAL( 100, orderQty );
+}
+
+TEST(allocationInstructionParseGetString)
+{
+  AllocationInstruction object;
+
+  object.getHeader().setField(SenderCompID("SENDER"));
+  object.getHeader().setField(TargetCompID("TARGET"));
+  object.getHeader().setField(MsgSeqNum(1));
+  FIX44::Header::NoHops hops;
+  hops.setField(HopCompID("HOP1"));
+  hops.setField(HopRefID(1));
+  object.getHeader().addGroup(hops);
+  hops.setField(HopCompID("HOP2"));
+  hops.setField(HopRefID(2));
+  object.getHeader().addGroup(hops);
+  object.setField(AllocID("Alloc001"));
+  object.setField(AllocTransType(AllocTransType_NEW));
+  object.setField(AllocType(AllocType_CALCULATED));
+  object.setField(AllocNoOrdersType(AllocNoOrdersType_NOT_SPECIFIED));
+  object.setField(Quantity(100));
+  object.setField(AvgPx(23.1));
+  object.setField(TradeDate("20170317"));
+
+  CHECK_EQUAL(
+          "8=FIX.4.4\0019=121\00135=J\00134=1\00149=SENDER\00156=TARGET\001627=2\001"
+          "628=HOP1\001630=1\001628=HOP2\001630=2\0016=23.1\00153=100\00170=Alloc001\001"
+          "71=0\00175=20170317\001626=1\001857=0\00110=159\001", object.toString());
+}
+
+TEST(allocationInstructionString)
+{
+  AllocationInstruction object;
+  DataDictionary dataDictionary( "../spec/FIX44.xml" );
+
+  object.setString
+    ( "8=FIX.4.4\0019=198\00135=J\00134=1\00149=SENDER\00152=20170317-15:55:23.685\001"
+      "56=TARGET\001627=2\001628=HOP1\001629=20170317-15:55:23.685\001630=1\001"
+      "628=HOP2\001629=20170317-15:55:23.685\001630=2\0016=23.1\00153=100\001"
+      "70=Alloc001\00171=0\00175=20170317\001626=1\001857=0\00110=196\001",
+      true, &dataDictionary );
+
+  FIX::SenderCompID senderCompID;
+  FIX::TargetCompID targetCompID;
+  FIX::SendingTime sendingTime;
+  FIX::MsgSeqNum msgSeqNum;
+  FIX::HopCompID hopCompID;
+  FIX::HopSendingTime hopSendingTime;
+  FIX::HopRefID hopRefID;
+
+  CHECK_EQUAL( "SENDER", object.getHeader().get(senderCompID));
+  CHECK_EQUAL( "TARGET", object.getHeader().get(targetCompID));
+  CHECK_EQUAL( "20170317-15:55:23.685", object.getHeader().get(sendingTime).getString());
+  CHECK_EQUAL( 1, object.getHeader().get(msgSeqNum));
+
+  FIX44::Header::NoHops noHops;
+  object.getHeader().getGroup( 1, noHops );
+  CHECK_EQUAL( "HOP1", noHops.get(hopCompID) );
+  CHECK_EQUAL( "20170317-15:55:23.685", noHops.getField(hopSendingTime).getString() );
+  CHECK_EQUAL( 1, noHops.get(hopRefID) );
+
+  object.getHeader().getGroup( 2, noHops );
+  CHECK_EQUAL( "HOP2", noHops.get(hopCompID) );
+  CHECK_EQUAL( "20170317-15:55:23.685", noHops.getField(hopSendingTime).getString() );
+  CHECK_EQUAL( 2, noHops.get(hopRefID) );
+
+  FIX::AllocID allocID;
+  FIX::AllocTransType allocTransType;
+  FIX::AllocType allocType;
+  FIX::AllocNoOrdersType allocNoOrdersType;
+  FIX::Quantity quantity;
+  FIX::AvgPx avgPx;
+  FIX::TradeDate tradeDate;
+  CHECK_EQUAL( "Alloc001", object.get(allocID) );
+  CHECK_EQUAL( AllocTransType_NEW, object.get(allocTransType) );
+  CHECK_EQUAL( AllocType_CALCULATED, object.get(allocType) );
+  CHECK_EQUAL( AllocNoOrdersType_NOT_SPECIFIED, object.get(allocNoOrdersType) );
+  CHECK_EQUAL( 100, object.get(quantity) );
+  CHECK_EQUAL( 23.1, object.get(avgPx) );
+  CHECK_EQUAL( "20170317", object.get(tradeDate) );
+
+  FIX::CheckSum checkSum;
+  CHECK_EQUAL( 196, object.getTrailer().get(checkSum) );
+}
+
+
+TEST(initializeXml_UrlIsIncorrect_False)
+{
+  FIX::Message msg;
+  CHECK(!msg.InitializeXML("wrong"));
+}
+
+TEST(setString_TrailerStructureInvalid_MessageStructureInvalid) {
+
+  DataDictionary dictionary;
+  dictionary.checkFieldsOutOfOrder(true);
+  dictionary.addHeaderField(FIELD::BeginString, true);
+  dictionary.addHeaderField(FIELD::MsgType, true);
+  dictionary.addField(FIELD::ClOrdID);
+  dictionary.addField(FIELD::MsgType);
+  dictionary.addTrailerField(FIELD::CheckSum, true);
+  dictionary.addFieldType(FIELD::CheckSum, FIX::TYPE::Type::Int);
+
+  dictionary.setVersion(BeginString_FIX42);
+
+  FIX::Message msg;
+  std::string delimSOH = "\x01";
+  std::string rawFixMsg = "8=FIX.4.2" + delimSOH
+      + "9=200"         + delimSOH
+      + "35=A"          + delimSOH
+      + "49=SENDER"     + delimSOH
+      + "56=TARGET"     + delimSOH
+      + "34=1"          + delimSOH
+      + "98=0"          + delimSOH
+      + "10=200"        + delimSOH //Trailer in Body is invalid
+      + "108=30"        + delimSOH
+      + "10=200"        + delimSOH;
+
+
+  msg.setString(rawFixMsg, false, &dictionary, &dictionary);
+  int checkSumTag = FIELD::CheckSum;
+  CHECK(!msg.hasValidStructure(checkSumTag));
+}
+
+TEST(setString_SignatureInTrailerWithoutSignatureLength_InvalidMessageException) {
+
+  DataDictionary dictionary;
+  dictionary.checkFieldsOutOfOrder(true);
+  dictionary.addHeaderField(FIELD::BeginString, true);
+  dictionary.addHeaderField(FIELD::MsgType, true);
+  dictionary.addField(FIELD::ClOrdID);
+  dictionary.addField(FIELD::MsgType);
+  dictionary.addTrailerField(FIELD::CheckSum, true);
+  dictionary.addTrailerField(FIELD::Signature, true);
+
+  dictionary.addFieldType(FIELD::Signature, FIX::TYPE::Type::Data);
+
+  dictionary.setVersion(BeginString_FIX42);
+
+  FIX::Message msg;
+  std::string delimSOH = "\x01";
+  std::string rawFixMsg = "8=FIX.4.2" + delimSOH
+      + "9=200"         + delimSOH
+      + "35=A"          + delimSOH
+      + "49=SENDER"     + delimSOH
+      + "56=TARGET"     + delimSOH
+      + "34=1"          + delimSOH
+      + "98=0"          + delimSOH
+      + "108=30"        + delimSOH
+      + "89=200"        + delimSOH; // Signature
+      + "10=200"        + delimSOH;
+
+  CHECK_THROW(msg.setString(rawFixMsg, false, &dictionary, &dictionary), InvalidMessage);
+
+}
+
+TEST(setStringAndValidate_IncorrectBodyLength_InvalidException) {
+
+  DataDictionary dictionary;
+
+  FIX::Message msg;
+  std::string delimSOH = "\x01";
+  std::string rawFixMsg = "8=FIX.4.2" + delimSOH
+      + "9=2000"        + delimSOH //Incorrect BodyLength
+      + "35=A"          + delimSOH
+      + "49=SENDER"     + delimSOH
+      + "56=TARGET"     + delimSOH
+      + "34=1"          + delimSOH
+      + "98=0"          + delimSOH
+      + "108=30"        + delimSOH
+      + "10=200"        + delimSOH;
+
+  CHECK_THROW(msg.setString(rawFixMsg, true, &dictionary, &dictionary), InvalidMessage);
+}
+
+TEST(BeginStringToApplVerID) {
+  CHECK_EQUAL(ApplVerID(ApplVerID_FIX40), FIX::Message::toApplVerID(BeginString(FIX::BeginString_FIX40)));
+  CHECK_EQUAL(ApplVerID(ApplVerID_FIX41), FIX::Message::toApplVerID(BeginString(FIX::BeginString_FIX41)));
+  CHECK_EQUAL(ApplVerID(ApplVerID_FIX42), FIX::Message::toApplVerID(BeginString(FIX::BeginString_FIX42)));
+  CHECK_EQUAL(ApplVerID(ApplVerID_FIX43), FIX::Message::toApplVerID(BeginString(FIX::BeginString_FIX43)));
+  CHECK_EQUAL(ApplVerID(ApplVerID_FIX44), FIX::Message::toApplVerID(BeginString(FIX::BeginString_FIX44)));
+  CHECK_EQUAL(ApplVerID(ApplVerID_FIX50), FIX::Message::toApplVerID(BeginString(FIX::BeginString_FIX50)));
+  CHECK_EQUAL(ApplVerID(ApplVerID_FIX50SP1), FIX::Message::toApplVerID(BeginString("FIX.5.0SP1")));
+  CHECK_EQUAL(ApplVerID(ApplVerID_FIX50SP2), FIX::Message::toApplVerID(BeginString("FIX.5.0SP2")));
+  CHECK_EQUAL(ApplVerID("Custom"), FIX::Message::toApplVerID(BeginString("Custom")));
+
 }
 
 }

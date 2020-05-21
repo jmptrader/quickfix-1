@@ -27,16 +27,20 @@
 #include "C++/Utility.h"
 #include "C++/SessionSettings.h"
 #ifndef _MSC_VER
+#include <DataDictionaryProviderTestCase.cpp>
 #include <DataDictionaryTestCase.cpp>
 #include <DictionaryTestCase.cpp>
 #include <FieldBaseTestCase.cpp>
 #include <FieldConvertorsTestCase.cpp>
+#include <FieldMapTestCase.cpp>
+#include <FieldTypesTestCase.cpp>
 #include <FileLogTestCase.cpp>
 #include <FileStoreFactoryTestCase.cpp>
 #include <FileStoreTestCase.cpp>
 #include <FileUtilitiesTestCase.cpp>
 #include <HttpMessageTestCase.cpp>
 #include <HttpParserTestCase.cpp>
+#include <GroupTestCase.cpp>
 #include <MemoryStoreTestCase.cpp>
 #include <MessageSortersTestCase.cpp>
 #include <MessagesTestCase.cpp>
@@ -47,16 +51,22 @@
 #include <PostgreSQLStoreTestCase.cpp>
 #include <SessionIDTestCase.cpp>
 #include <SessionSettingsTestCase.cpp>
+#include <SessionStateTestCase.cpp>
 #include <SessionTestCase.cpp>
 #include <SessionFactoryTestCase.cpp>
 #include <SettingsTestCase.cpp>
+#include <SharedArrayTestCase.cpp>
 #include <SocketAcceptorTestCase.cpp>
+#include <SocketConnectionTestCase.cpp>
 #include <SocketConnectorTestCase.cpp>
+#include <SocketMonitorTestCase.cpp>
 #include <SocketServerTestCase.cpp>
 #include <TestHelper.cpp>
 #include <TimeRangeTestCase.cpp>
 #include <UtcTimeOnlyTestCase.cpp>
 #include <UtcTimeStampTestCase.cpp>
+#include <UtilityTestCase.cpp>
+
 #endif
 #include <UnitTest++.h>
 #include <TestReporterStdout.h>

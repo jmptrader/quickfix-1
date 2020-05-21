@@ -1,8 +1,13 @@
+if NO_UNIT_TEST
+SUBDIRS =
+else
 SUBDIRS = test
+endif
 
 LEX += -+ -olex.yy.c
 
 lib_LTLIBRARIES = libquickfix.la
+
 libquickfix_la_SOURCES = \
 	Allocator.h \
 	AtomicCount.h \
@@ -71,6 +76,7 @@ libquickfix_la_SOURCES = \
 	Application.h \
 	Field.h \
 	FieldConvertors.h \
+	FieldConvertors.cpp \
 	FieldNumbers.h \
 	FieldTypes.cpp \
 	FieldTypes.h \
@@ -112,7 +118,29 @@ libquickfix_la_SOURCES = \
 	pugixml.hpp \
 	pugiconfig.hpp \
 	MessageCracker.h \
-	Responder.h
+	Responder.h \
+	wx/sharedptr.h
+	
+if HAVE_SSL
+libquickfix_la_ssl_SOURCES = ThreadedSSLSocketAcceptor.cpp \
+	ThreadedSSLSocketAcceptor.h \
+	ThreadedSSLSocketInitiator.cpp \
+	ThreadedSSLSocketInitiator.h \
+	ThreadedSSLSocketConnection.cpp \
+	ThreadedSSLSocketConnection.h \
+	SSLSocketAcceptor.cpp \
+	SSLSocketAcceptor.h \
+	SSLSocketInitiator.cpp \
+	SSLSocketInitiator.h \
+	SSLSocketConnection.cpp \
+	SSLSocketConnection.h \
+	UtilitySSL.cpp \
+	UtilitySSL.h
+else
+libquickfix_la_ssl_SOURCES =
+endif
+
+libquickfix_la_SOURCES += $(libquickfix_la_ssl_SOURCES)
 
 BUILT_SOURCES = Allocator.h
 CLEANFILES = Allocator.h
@@ -130,6 +158,7 @@ all-local:
 	ln -s ../src/C++/.libs/libquickfix.dylib $(top_builddir)/lib/libquickfix.dylib
 	bash ./copy.sh $(top_builddir)/include/quickfix *.h
 	bash ./copy.sh $(top_builddir)/include/quickfix fix*/*.h
+	bash ./copy.sh $(top_builddir)/include/quickfix wx/*.h
 
 clean-local:
 	rm -rf $(top_builddir)/lib/libquickfix.a
@@ -148,6 +177,7 @@ install-exec-local: *.h
 	mkdir $(DESTDIR)$(pkgincludedir)/fix50sp1
 	mkdir $(DESTDIR)$(pkgincludedir)/fix50sp2
 	mkdir $(DESTDIR)$(pkgincludedir)/fixt11
+	mkdir $(DESTDIR)$(pkgincludedir)/wx
 	cp *.h $(DESTDIR)$(pkgincludedir)
 	cp fix40/*.h $(DESTDIR)$(pkgincludedir)/fix40
 	cp fix41/*.h $(DESTDIR)$(pkgincludedir)/fix41
@@ -158,12 +188,13 @@ install-exec-local: *.h
 	cp fix50sp1/*.h $(DESTDIR)$(pkgincludedir)/fix50sp1
 	cp fix50sp2/*.h $(DESTDIR)$(pkgincludedir)/fix50sp2
 	cp fixt11/*.h $(DESTDIR)$(pkgincludedir)/fixt11
+	cp wx/*.h $(DESTDIR)$(pkgincludedir)/wx
 
 uninstall-local:
 	rm -rf $(DESTDIR)$(pkgincludedir)
 
 EXTRA_DIST = strptime.c strptime.h
 
-libquickfix_la_LDFLAGS = -version-info 16:1:0
+libquickfix_la_LDFLAGS = -version-info 17:0:0
 
 INCLUDES =-I. -I.. -I../..

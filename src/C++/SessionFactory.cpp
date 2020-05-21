@@ -39,7 +39,7 @@ SessionFactory::~SessionFactory()
 }
 
 Session* SessionFactory::create( const SessionID& sessionID,
-                                 const Dictionary& settings ) throw( ConfigError )
+                                 const Dictionary& settings ) EXCEPT ( ConfigError )
 {
   std::string connectionType = settings.getString( CONNECTION_TYPE );
   if ( connectionType != "acceptor" && connectionType != "initiator" )
@@ -120,7 +120,7 @@ Session* SessionFactory::create( const SessionID& sessionID,
     if ( heartBtInt <= 0 ) throw ConfigError( "Heartbeat must be greater than zero" );
   }
 
-  std::auto_ptr<Session> pSession;
+  SmartPtr<Session> pSession;
   pSession.reset( new Session( m_application, m_messageStoreFactory,
     sessionID, dataDictionaryProvider, sessionTimeRange,
     heartBtInt, m_pLogFactory ) );
@@ -189,7 +189,9 @@ Session* SessionFactory::create( const SessionID& sessionID,
   if ( settings.has( REFRESH_ON_LOGON ) )
     pSession->setRefreshOnLogon( settings.getBool( REFRESH_ON_LOGON ) );
   if ( settings.has( MILLISECONDS_IN_TIMESTAMP ) )
-    pSession->setMillisecondsInTimeStamp( settings.getBool( MILLISECONDS_IN_TIMESTAMP ) );
+    pSession->setTimestampPrecision(3);
+  if ( settings.has( TIMESTAMP_PRECISION ) )
+    pSession->setTimestampPrecision(settings.getInt( TIMESTAMP_PRECISION ) );
   if ( settings.has( PERSIST_MESSAGES ) )
     pSession->setPersistMessages( settings.getBool( PERSIST_MESSAGES ) );
   if ( settings.has( VALIDATE_LENGTH_AND_CHECKSUM ) )
@@ -205,7 +207,7 @@ void SessionFactory::destroy( Session* pSession )
 
 ptr::shared_ptr<DataDictionary> SessionFactory::createDataDictionary(const SessionID& sessionID, 
                                                                      const Dictionary& settings, 
-                                                                     const std::string& settingsKey) throw(ConfigError)
+                                                                     const std::string& settingsKey) EXCEPT (ConfigError)
 {
   ptr::shared_ptr<DataDictionary> pDD;
   std::string path = settings.getString( settingsKey );
@@ -216,7 +218,10 @@ ptr::shared_ptr<DataDictionary> SessionFactory::createDataDictionary(const Sessi
   }
   else
   {
-    pDD = ptr::shared_ptr<DataDictionary>(new DataDictionary( path ));
+    bool preserveMsgFldsOrder = false;
+    if( settings.has( PRESERVE_MESSAGE_FIELDS_ORDER ) )
+      preserveMsgFldsOrder = settings.getBool( PRESERVE_MESSAGE_FIELDS_ORDER );
+    pDD = ptr::shared_ptr<DataDictionary>(new DataDictionary( path, preserveMsgFldsOrder ));
     m_dictionaries[ path ] = pDD;
   }
 
@@ -228,13 +233,15 @@ ptr::shared_ptr<DataDictionary> SessionFactory::createDataDictionary(const Sessi
     pCopyOfDD->checkFieldsHaveValues( settings.getBool( VALIDATE_FIELDS_HAVE_VALUES ) );
   if( settings.has( VALIDATE_USER_DEFINED_FIELDS ) )
     pCopyOfDD->checkUserDefinedFields( settings.getBool( VALIDATE_USER_DEFINED_FIELDS ) );
+  if( settings.has( ALLOW_UNKNOWN_MSG_FIELDS ) )
+    pCopyOfDD->allowUnknownMsgFields( settings.getBool( ALLOW_UNKNOWN_MSG_FIELDS ) );
 
   return pCopyOfDD;
 }
 
 void SessionFactory::processFixtDataDictionaries(const SessionID& sessionID, 
                                                  const Dictionary& settings, 
-                                                 DataDictionaryProvider& provider) throw(ConfigError)
+                                                 DataDictionaryProvider& provider) EXCEPT (ConfigError)
 {
   ptr::shared_ptr<DataDictionary> pDataDictionary = createDataDictionary(sessionID, settings, TRANSPORT_DATA_DICTIONARY);
   provider.addTransportDataDictionary(sessionID.getBeginString(), pDataDictionary);
@@ -265,7 +272,7 @@ void SessionFactory::processFixtDataDictionaries(const SessionID& sessionID,
 
 void SessionFactory::processFixDataDictionary(const SessionID& sessionID, 
                                               const Dictionary& settings, 
-                                              DataDictionaryProvider& provider) throw(ConfigError)
+                                              DataDictionaryProvider& provider) EXCEPT (ConfigError)
 {
   ptr::shared_ptr<DataDictionary> pDataDictionary = createDataDictionary(sessionID, settings, DATA_DICTIONARY);
   provider.addTransportDataDictionary(sessionID.getBeginString(), pDataDictionary);

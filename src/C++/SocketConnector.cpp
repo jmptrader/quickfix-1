@@ -44,23 +44,23 @@ public:
 : m_connector( connector ), m_strategy( strategy ) {}
 
 private:
-  void onConnect( SocketMonitor&, int socket )
+  void onConnect( SocketMonitor&, socket_handle socket )
   {    
     m_strategy.onConnect( m_connector, socket );
   }
 
-  void onWrite( SocketMonitor&, int socket )
+  void onWrite( SocketMonitor&, socket_handle socket )
   {
     m_strategy.onWrite( m_connector, socket );
   }
 
-  void onEvent( SocketMonitor&, int socket )
+  void onEvent( SocketMonitor&, socket_handle socket )
   {
     if( !m_strategy.onData( m_connector, socket ) )
       m_strategy.onDisconnect( m_connector, socket );
   }
 
-  void onError( SocketMonitor&, int socket )
+  void onError( SocketMonitor&, socket_handle socket )
   {
     m_strategy.onDisconnect( m_connector, socket );
   }
@@ -82,12 +82,13 @@ private:
 SocketConnector::SocketConnector( int timeout )
 : m_monitor( timeout ) {}
 
-int SocketConnector::connect( const std::string& address, int port, bool noDelay,
-                              int sendBufSize, int rcvBufSize )
+socket_handle SocketConnector::connect( const std::string& address, int port, bool noDelay,
+                              int sendBufSize, int rcvBufSize,
+                              const std::string& sourceAddress, int sourcePort)
 {
-  int socket = socket_createConnector();
+  socket_handle socket = socket_createConnector();
 
-  if ( socket != -1 )
+  if ( socket != INVALID_SOCKET_HANDLE )
   {
     if( noDelay )
       socket_setsockopt( socket, TCP_NODELAY );
@@ -95,16 +96,18 @@ int SocketConnector::connect( const std::string& address, int port, bool noDelay
       socket_setsockopt( socket, SO_SNDBUF, sendBufSize );
     if( rcvBufSize )
       socket_setsockopt( socket, SO_RCVBUF, rcvBufSize );
+    if ( !sourceAddress.empty() || sourcePort )
+          socket_bind( socket, sourceAddress.c_str(), sourcePort );
     m_monitor.addConnect( socket );
     socket_connect( socket, address.c_str(), port );
   }
   return socket;
 }
 
-int SocketConnector::connect( const std::string& address, int port, bool noDelay, 
+socket_handle SocketConnector::connect( const std::string& address, int port, bool noDelay,
                               int sendBufSize, int rcvBufSize, Strategy& strategy )
 {
-  int socket = connect( address, port, noDelay, sendBufSize, rcvBufSize );
+  socket_handle socket = connect( address, port, noDelay, sendBufSize, rcvBufSize, "", 0);
   return socket;
 }
 

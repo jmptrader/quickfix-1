@@ -22,7 +22,11 @@
 #ifndef ATOMIC_COUNT
 #define ATOMIC_COUNT
 
+#include "Utility.h"
+
+#if defined(__SUNPRO_CC) ||  defined(__TOS_AIX__)
 #include "Mutex.h"
+#endif
 
 namespace FIX
 {
@@ -55,7 +59,7 @@ typedef boost::detail::atomic_count atomic_count;
 
     operator long() const
     {
-      return static_cast<long const volatile &>( m_counter );
+      return ::InterlockedExchangeAdd(const_cast<long volatile *>( &m_counter ), 0 );
     }
 
   private:
@@ -66,30 +70,75 @@ typedef boost::detail::atomic_count atomic_count;
     long volatile m_counter;
   };
 
+#elif defined(__SUNPRO_CC) ||  defined(__TOS_AIX__)
+
+// general purpose atomic counter using mutexes
+class atomic_count
+{
+public:
+  explicit atomic_count( long v ): m_counter( v )
+  {
+  }
+
+  long operator++()
+  {
+    Locker _lock(m_mutex);
+    return ++m_counter;
+  }
+
+  long operator--()
+  {
+    Locker _lock(m_mutex);
+    return --m_counter;
+  }
+
+  operator long() const
+  {
+    return static_cast<long const volatile &>( m_counter );
+  }
+
+private:
+
+  atomic_count( atomic_count const & );
+  atomic_count & operator=( atomic_count const & );
+
+  Mutex m_mutex;
+  long m_counter;
+};
+
 #else
-  // general purpose atomic counter using mutexes
+
+  //
+  //  boost/detail/atomic_count_gcc_x86.hpp
+  //
+  //  atomic_count for g++ on 486+/AMD64
+  //
+  //  Copyright 2007 Peter Dimov
+  //
+  //  Distributed under the Boost Software License, Version 1.0. (See
+  //  accompanying file LICENSE_1_0.txt or copy at
+  //  http://www.boost.org/LICENSE_1_0.txt)
+  //
+
   class atomic_count
   {
   public:
-    explicit atomic_count( long v ): m_counter( v )
-    {
-    }
+
+    explicit atomic_count( long v ) : value_(static_cast<int>(v)) {}
 
     long operator++()
     {
-      Locker _lock(m_mutex);
-      return ++m_counter;
+      return atomic_exchange_and_add( &value_, 1 ) + 1;
     }
 
     long operator--()
     {
-      Locker _lock(m_mutex);
-      return --m_counter;
+      return atomic_exchange_and_add( &value_, -1 ) - 1;
     }
 
     operator long() const
     {
-      return static_cast<long const volatile &>( m_counter );
+      return atomic_exchange_and_add( &value_, 0 );
     }
 
   private:
@@ -97,8 +146,29 @@ typedef boost::detail::atomic_count atomic_count;
     atomic_count( atomic_count const & );
     atomic_count & operator=( atomic_count const & );
 
-    Mutex m_mutex;
-    long m_counter;
+    mutable int value_;
+
+  private:
+
+    static int atomic_exchange_and_add(int * pw, int dv)
+    {
+      // int r = *pw;
+      // *pw += dv;
+      // return r;
+
+      int r;
+
+      __asm__ __volatile__
+        (
+          "lock\n\t"
+          "xadd %1, %0":
+          "+m"(*pw), "=r"(r) : // outputs (%0, %1)
+          "1"(dv) : // inputs (%2 == %1)
+          "memory", "cc" // clobbers
+        );
+
+      return r;
+    }
   };
 
 #endif

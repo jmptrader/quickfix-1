@@ -40,15 +40,15 @@ void Application::toAdmin( FIX::Message& message,
                            const FIX::SessionID& sessionID ) {}
 void Application::toApp( FIX::Message& message,
                          const FIX::SessionID& sessionID )
-throw( FIX::DoNotSend ) {}
+EXCEPT( FIX::DoNotSend ) {}
 
 void Application::fromAdmin( const FIX::Message& message,
                              const FIX::SessionID& sessionID )
-throw( FIX::FieldNotFound, FIX::IncorrectDataFormat, FIX::IncorrectTagValue, FIX::RejectLogon ) {}
+EXCEPT( FIX::FieldNotFound, FIX::IncorrectDataFormat, FIX::IncorrectTagValue, FIX::RejectLogon ) {}
 
 void Application::fromApp( const FIX::Message& message,
                            const FIX::SessionID& sessionID )
-throw( FIX::FieldNotFound, FIX::IncorrectDataFormat, FIX::IncorrectTagValue, FIX::UnsupportedMessageType )
+EXCEPT( FIX::FieldNotFound, FIX::IncorrectDataFormat, FIX::IncorrectTagValue, FIX::UnsupportedMessageType )
 { crack( message, sessionID ); }
 
 void Application::onMessage( const FIX40::NewOrderSingle& message,
@@ -269,7 +269,7 @@ void Application::onMessage( const FIX44::NewOrderSingle& message,
   FIX44::ExecutionReport executionReport = FIX44::ExecutionReport
       ( FIX::OrderID( genOrderID() ),
         FIX::ExecID( genExecID() ),
-        FIX::ExecType( FIX::ExecType_FILL ),
+        FIX::ExecType( FIX::ExecType_TRADE ),
         FIX::OrdStatus( FIX::OrdStatus_FILLED ),
         side,
         FIX::LeavesQty( 0 ),
@@ -317,7 +317,7 @@ void Application::onMessage( const FIX50::NewOrderSingle& message,
   FIX50::ExecutionReport executionReport = FIX50::ExecutionReport
       ( FIX::OrderID( genOrderID() ),
         FIX::ExecID( genExecID() ),
-        FIX::ExecType( FIX::ExecType_FILL ),
+        FIX::ExecType( FIX::ExecType_TRADE ),
         FIX::OrdStatus( FIX::OrdStatus_FILLED ),
         side,
         FIX::LeavesQty( 0 ),

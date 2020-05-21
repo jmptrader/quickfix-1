@@ -54,6 +54,46 @@ class DataDictionary
   typedef std::set < int > Fields;
   typedef std::map < int, bool > NonBodyFields;
   typedef std::vector< int > OrderedFields;
+
+  struct MessageFieldsOrderHolder
+  {
+    MessageFieldsOrderHolder()
+    {}
+
+    ~MessageFieldsOrderHolder()
+    {}
+
+    void push_back(int field)
+    {
+      m_orderedFlds.push_back(field);
+    }
+
+    const message_order & getMessageOrder() const
+    {
+      if (m_msgOrder)
+        return m_msgOrder;
+
+      int * tmp = new int[m_orderedFlds.size() + 1];
+      int * i = tmp;
+
+      OrderedFields::const_iterator iter;
+      for( iter = m_orderedFlds.begin(); iter != m_orderedFlds.end(); *(i++) = *(iter++) ) {}
+      *i = 0;
+
+      m_msgOrder = message_order(tmp);
+      delete [] tmp;
+
+      return m_msgOrder;
+    }
+
+  private:
+
+    mutable message_order  m_msgOrder;
+    OrderedFields m_orderedFlds;
+  };
+
+  typedef std::map<std::string, MessageFieldsOrderHolder > MsgTypeToOrderedFields;
+
   typedef message_order OrderedFieldsArray;
   typedef std::map < int, TYPE::Type > FieldTypes;
   typedef std::set < std::string > Values;
@@ -72,15 +112,18 @@ class DataDictionary
 public:
   DataDictionary();
   DataDictionary( const DataDictionary& copy );
-  DataDictionary( std::istream& stream ) throw( ConfigError );
-  DataDictionary( const std::string& url ) throw( ConfigError );
+  DataDictionary(std::istream& stream , bool preserveMsgFldsOrder = false) EXCEPT ( ConfigError );
+  DataDictionary(const std::string& url , bool preserveMsgFldsOrder = false) EXCEPT ( ConfigError );
   virtual ~DataDictionary();
 
-  void readFromURL( const std::string& url ) throw( ConfigError );
-  void readFromDocument( DOMDocumentPtr pDoc ) throw( ConfigError );
-  void readFromStream( std::istream& stream ) throw( ConfigError );
+  void readFromURL( const std::string& url ) EXCEPT ( ConfigError );
+  void readFromDocument( const DOMDocumentPtr &pDoc ) EXCEPT ( ConfigError );
+  void readFromStream( std::istream& stream ) EXCEPT ( ConfigError );
 
   message_order const& getOrderedFields() const;
+  message_order const& getHeaderOrderedFields() const EXCEPT ( ConfigError );
+  message_order const& getTrailerOrderedFields() const EXCEPT ( ConfigError );
+  message_order const& getMessageOrderedFields(const std::string & msgType) const EXCEPT ( ConfigError );
 
   // storage functions
   void setVersion( const std::string& beginString )
@@ -152,6 +195,11 @@ public:
 
   void addMsgField( const std::string& msgType, int field )
   {
+    if (m_storeMsgFieldsOrder)
+    {
+      m_messageOrderedFields[ msgType ].push_back(field);
+    }
+
     m_messageFields[ msgType ].insert( field );
   }
 
@@ -164,6 +212,11 @@ public:
 
   void addHeaderField( int field, bool required )
   {
+    if (m_storeMsgFieldsOrder)
+    {
+      m_headerOrderedFields.push_back(field);
+    }
+
     m_headerFields[ field ] = required;
   }
 
@@ -174,6 +227,11 @@ public:
 
   void addTrailerField( int field, bool required )
   {
+    if (m_storeMsgFieldsOrder)
+    {
+      m_trailerOrderedFields.push_back(field);
+    }
+
     m_trailerFields[ field ] = required;
   }
 
@@ -303,15 +361,21 @@ public:
   { m_checkFieldsHaveValues = value; }
   void checkUserDefinedFields( bool value )
   { m_checkUserDefinedFields = value; }
+  void allowUnknownMsgFields( bool value )
+  { m_allowUnknownMessageFields = value; }
+  void preserveMessageFieldsOrder( bool value )
+  { m_storeMsgFieldsOrder = value; }
+  bool isMessageFieldsOrderPreserved() const
+  { return m_storeMsgFieldsOrder; }
 
   /// Validate a message.
   static void validate( const Message& message,
                         const DataDictionary* const pSessionDD,
-                        const DataDictionary* const pAppID ) throw( FIX::Exception );
+                        const DataDictionary* const pAppID ) EXCEPT ( FIX::Exception );
 
-  void validate( const Message& message ) const throw ( FIX::Exception )
+  void validate( const Message& message ) const EXCEPT ( FIX::Exception )
   { validate( message, false ); }
-  void validate( const Message& message, bool bodyOnly ) const throw( FIX::Exception )
+  void validate( const Message& message, bool bodyOnly ) const EXCEPT ( FIX::Exception )
   { validate( message, bodyOnly ? (DataDictionary*)0 : this, this ); }
 
   DataDictionary& operator=( const DataDictionary& rhs );
@@ -330,7 +394,9 @@ private:
   /// If we need to check for the tag in the dictionary
   bool shouldCheckTag( const FieldBase& field ) const
   {
-    if( !m_checkUserDefinedFields && field.getTag() >= FIELD::UserMin )
+    if( m_allowUnknownMessageFields && field.getTag() < FIELD::UserMin )
+      return false;
+    else if( !m_checkUserDefinedFields && field.getTag() >= FIELD::UserMin )
       return false;
     else
       return true;
@@ -338,14 +404,14 @@ private:
 
   /// Check if field tag number is defined in spec.
   void checkValidTagNumber( const FieldBase& field ) const
-  throw( InvalidTagNumber )
+  EXCEPT ( InvalidTagNumber )
   {
     if( m_fields.find( field.getTag() ) == m_fields.end() )
       throw InvalidTagNumber( field.getTag() );
   }
 
   void checkValidFormat( const FieldBase& field ) const
-  throw( IncorrectDataFormat )
+  EXCEPT ( IncorrectDataFormat )
   {
     try
     {
@@ -421,7 +487,7 @@ private:
   }
 
   void checkValue( const FieldBase& field ) const
-  throw( IncorrectTagValue )
+  EXCEPT ( IncorrectTagValue )
   {
     if ( !hasFieldValue( field.getTag() ) ) return ;
 
@@ -432,7 +498,7 @@ private:
 
   /// Check if a field has a value.
   void checkHasValue( const FieldBase& field ) const
-  throw( NoTagValue )
+  EXCEPT ( NoTagValue )
   {
     if ( m_checkFieldsHaveValues && !field.getString().length() )
       throw NoTagValue( field.getTag() );
@@ -441,7 +507,7 @@ private:
   /// Check if a field is in this message type.
   void checkIsInMessage
   ( const FieldBase& field, const MsgType& msgType ) const
-  throw( TagNotDefinedForMessage )
+  EXCEPT ( TagNotDefinedForMessage )
   {
     if ( !isMsgField( msgType, field.getTag() ) )
       throw TagNotDefinedForMessage( field.getTag() );
@@ -450,7 +516,7 @@ private:
   /// Check if group count matches number of groups in
   void checkGroupCount
   ( const FieldBase& field, const FieldMap& fieldMap, const MsgType& msgType ) const
-  throw( RepeatingGroupCountMismatch )
+  EXCEPT ( RepeatingGroupCountMismatch )
   {
     int fieldNum = field.getTag();
     if( isGroup(msgType, fieldNum) )
@@ -465,7 +531,7 @@ private:
   void checkHasRequired
   ( const FieldMap& header, const FieldMap& body, const FieldMap& trailer,
     const MsgType& msgType ) const
-  throw( RequiredTagMissing )
+  EXCEPT ( RequiredTagMissing )
   {
     NonBodyFields::const_iterator iNBF;
     for( iNBF = m_headerFields.begin(); iNBF != m_headerFields.end(); ++iNBF )
@@ -492,7 +558,7 @@ private:
         throw RequiredTagMissing( *iF );
     }
 
-    FieldMap::g_iterator groups;
+    FieldMap::g_const_iterator groups;
     for( groups = body.g_begin(); groups != body.g_end(); ++groups )
     {
       int delim;
@@ -517,6 +583,9 @@ private:
   bool m_checkFieldsOutOfOrder;
   bool m_checkFieldsHaveValues;
   bool m_checkUserDefinedFields;
+  bool m_allowUnknownMessageFields;
+  bool m_storeMsgFieldsOrder;
+  
   BeginString m_beginString;
   MsgTypeToField m_messageFields;
   MsgTypeToField m_requiredFields;
@@ -533,6 +602,11 @@ private:
   ValueToName m_valueNames;
   FieldToGroup m_groups;
   MsgFields m_dataFields;
+  OrderedFields m_headerOrderedFields;
+  mutable OrderedFieldsArray m_headerOrder;
+  OrderedFields m_trailerOrderedFields;
+  mutable OrderedFieldsArray m_trailerOrder;
+  MsgTypeToOrderedFields m_messageOrderedFields;
 };
 }
 

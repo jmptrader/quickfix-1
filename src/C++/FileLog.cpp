@@ -29,27 +29,27 @@ namespace FIX
 {
 Log* FileLogFactory::create()
 {
-  m_globalLogCount++;
-  if( m_globalLogCount > 1 ) return m_globalLog;
+  if ( ++m_globalLogCount > 1 ) return m_globalLog;
+
+  if ( m_path.size() ) return new FileLog(m_path);
 
   try
   {
-    if ( m_path.size() ) return new FileLog( m_path );
-    std::string path;
-    std::string backupPath;
 
-    Dictionary settings = m_settings.get();
-    path = settings.getString( FILE_LOG_PATH );
-    backupPath = path;
-    if( settings.has( FILE_LOG_BACKUP_PATH ) )
+    const Dictionary& settings = m_settings.get();
+    std::string path = settings.getString(FILE_LOG_PATH);
+    std::string backupPath = path;
+
+    if ( settings.has( FILE_LOG_BACKUP_PATH ) )
       backupPath = settings.getString( FILE_LOG_BACKUP_PATH );
 
     return m_globalLog = new FileLog( path, backupPath );
+
   }
   catch( ConfigError& )
   {
-  m_globalLogCount--;
-  throw;  
+    m_globalLogCount--;
+    throw;
   }
 }
 
@@ -57,7 +57,7 @@ Log* FileLogFactory::create( const SessionID& s )
 {
   if ( m_path.size() && m_backupPath.size() )
     return new FileLog( m_path, m_backupPath, s );
-  if ( m_path.size() ) 
+  if ( m_path.size() )
     return new FileLog( m_path, s );
 
   std::string path;
@@ -73,41 +73,28 @@ Log* FileLogFactory::create( const SessionID& s )
 
 void FileLogFactory::destroy( Log* pLog )
 {
-  if( pLog == m_globalLog )
-  {
-    m_globalLogCount--;
-    if( m_globalLogCount == 0 )
-    {
-      delete pLog;
-      m_globalLogCount = 0;
-    }  
-  }
-  else
+  if ( pLog != m_globalLog || --m_globalLogCount == 0 )
   {
     delete pLog;
   }
 }
 
 FileLog::FileLog( const std::string& path )
-: m_millisecondsInTimeStamp( true )
 {
   init( path, path, "GLOBAL" );
 }
 
 FileLog::FileLog( const std::string& path, const std::string& backupPath )
-: m_millisecondsInTimeStamp( true )
 {
   init( path, backupPath, "GLOBAL" );
 }
 
 FileLog::FileLog( const std::string& path, const SessionID& s )
-: m_millisecondsInTimeStamp( true )
 {
   init( path, path, generatePrefix(s) );
 }
 
 FileLog::FileLog( const std::string& path, const std::string& backupPath, const SessionID& s )
-: m_millisecondsInTimeStamp( true )
 {
   init( path, backupPath, generatePrefix(s) );
 }
@@ -131,7 +118,7 @@ std::string FileLog::generatePrefix( const SessionID& s )
 }
 
 void FileLog::init( std::string path, std::string backupPath, const std::string& prefix )
-{  
+{
   file_mkdir( path.c_str() );
   file_mkdir( backupPath.c_str() );
 
@@ -177,7 +164,7 @@ void FileLog::backup()
   {
     std::stringstream messagesFileName;
     std::stringstream eventFileName;
- 
+
     messagesFileName << m_fullBackupPrefix << "messages.backup." << ++i << ".log";
     eventFileName << m_fullBackupPrefix << "event.backup." << i << ".log";
     FILE* messagesLogFile = file_fopen( messagesFileName.str().c_str(), "r" );
@@ -191,7 +178,7 @@ void FileLog::backup()
       m_event.open( m_eventFileName.c_str(), std::ios::out | std::ios::trunc );
       return;
     }
-    
+
     if( messagesLogFile != NULL ) file_fclose( messagesLogFile );
     if( eventLogFile != NULL ) file_fclose( eventLogFile );
   }

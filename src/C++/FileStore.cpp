@@ -130,10 +130,18 @@ void FileStore::populateCache()
   {
     int num;
     long offset;
-    size_t size;
+    std::size_t size;
 
-    while ( FILE_FSCANF( headerFile, "%d,%ld,%lu ", &num, &offset, &size ) == 3 )
-      m_offsets[ num ] = std::make_pair( offset, size );
+    while (FILE_FSCANF(headerFile, "%d,%ld,%lu ", &num, &offset, &size) == 3)
+    {
+      std::pair<NumToOffset::iterator, bool> it = 
+        m_offsets.insert(NumToOffset::value_type(num, std::make_pair(offset, size)));
+      //std::cout << it.first->second.first << " --- " << it.first->second.second << '\n';
+      if (it.second == false)
+      {
+        it.first->second = std::make_pair(offset, size);
+      }
+    }
     fclose( headerFile );
   }
 
@@ -160,7 +168,7 @@ void FileStore::populateCache()
 #endif
     if( result == 1 )
     {
-      m_cache.setCreationTime( UtcTimeStampConvertor::convert( time, true ) );
+      m_cache.setCreationTime( UtcTimeStampConvertor::convert( time ) );
     }
     fclose( sessionFile );
   }
@@ -182,7 +190,7 @@ void FileStoreFactory::destroy( MessageStore* pStore )
 }
 
 bool FileStore::set( int msgSeqNum, const std::string& msg )
-throw ( IOException )
+EXCEPT ( IOException )
 {
   if ( fseek( m_msgFile, 0, SEEK_END ) ) 
     throw IOException( "Cannot seek to end of " + m_msgFileName );
@@ -192,11 +200,16 @@ throw ( IOException )
   long offset = ftell( m_msgFile );
   if ( offset < 0 ) 
     throw IOException( "Unable to get file pointer position from " + m_msgFileName );
-  size_t size = msg.size();
+  std::size_t size = msg.size();
 
   if ( fprintf( m_headerFile, "%d,%ld,%lu ", msgSeqNum, offset, size ) < 0 )
     throw IOException( "Unable to write to file " + m_headerFileName );
-  m_offsets[ msgSeqNum ] = std::make_pair( offset, size );
+  std::pair<NumToOffset::iterator, bool> it = 
+    m_offsets.insert(NumToOffset::value_type(msgSeqNum, std::make_pair(offset, size)));
+  if (it.second == false)
+  {
+    it.first->second = std::make_pair(offset, size);
+  }
   fwrite( msg.c_str(), sizeof( char ), msg.size(), m_msgFile );
   if ( ferror( m_msgFile ) ) 
     throw IOException( "Unable to write to file " + m_msgFileName );
@@ -209,7 +222,7 @@ throw ( IOException )
 
 void FileStore::get( int begin, int end,
                      std::vector < std::string > & result ) const
-throw ( IOException )
+EXCEPT ( IOException )
 {
   result.clear();
   std::string msg;
@@ -220,46 +233,46 @@ throw ( IOException )
   }
 }
 
-int FileStore::getNextSenderMsgSeqNum() const throw ( IOException )
+int FileStore::getNextSenderMsgSeqNum() const EXCEPT ( IOException )
 {
   return m_cache.getNextSenderMsgSeqNum();
 }
 
-int FileStore::getNextTargetMsgSeqNum() const throw ( IOException )
+int FileStore::getNextTargetMsgSeqNum() const EXCEPT ( IOException )
 {
   return m_cache.getNextTargetMsgSeqNum();
 }
 
-void FileStore::setNextSenderMsgSeqNum( int value ) throw ( IOException )
+void FileStore::setNextSenderMsgSeqNum( int value ) EXCEPT ( IOException )
 {
   m_cache.setNextSenderMsgSeqNum( value );
   setSeqNum();
 }
 
-void FileStore::setNextTargetMsgSeqNum( int value ) throw ( IOException )
+void FileStore::setNextTargetMsgSeqNum( int value ) EXCEPT ( IOException )
 {
   m_cache.setNextTargetMsgSeqNum( value );
   setSeqNum();
 }
 
-void FileStore::incrNextSenderMsgSeqNum() throw ( IOException )
+void FileStore::incrNextSenderMsgSeqNum() EXCEPT ( IOException )
 {
   m_cache.incrNextSenderMsgSeqNum();
   setSeqNum();
 }
 
-void FileStore::incrNextTargetMsgSeqNum() throw ( IOException )
+void FileStore::incrNextTargetMsgSeqNum() EXCEPT ( IOException )
 {
   m_cache.incrNextTargetMsgSeqNum();
   setSeqNum();
 }
 
-UtcTimeStamp FileStore::getCreationTime() const throw ( IOException )
+UtcTimeStamp FileStore::getCreationTime() const EXCEPT ( IOException )
 {
   return m_cache.getCreationTime();
 }
 
-void FileStore::reset() throw ( IOException )
+void FileStore::reset() EXCEPT ( IOException )
 {
   try
   {
@@ -273,7 +286,7 @@ void FileStore::reset() throw ( IOException )
   }
 }
 
-void FileStore::refresh() throw ( IOException )
+void FileStore::refresh() EXCEPT ( IOException )
 {
   try
   {
@@ -309,7 +322,7 @@ void FileStore::setSession()
 }
 
 bool FileStore::get( int msgSeqNum, std::string& msg ) const
-throw ( IOException )
+EXCEPT ( IOException )
 {
   NumToOffset::const_iterator find = m_offsets.find( msgSeqNum );
   if ( find == m_offsets.end() ) return false;

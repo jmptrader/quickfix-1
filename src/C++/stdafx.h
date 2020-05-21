@@ -11,6 +11,7 @@
 #endif // _MSC_VER > 1000
 
 #define WIN32_LEAN_AND_MEAN
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include <stdio.h>
 #include "../config_windows.h"
@@ -24,9 +25,6 @@
 #endif
 
 #define _WIN32_DCOM
-
-#import <msxml3.dll> raw_interfaces_only named_guids
-using namespace MSXML2;
 
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ will insert additional declarations immediately before the previous line.

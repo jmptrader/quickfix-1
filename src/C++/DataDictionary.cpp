@@ -40,22 +40,21 @@ namespace FIX
 {
 DataDictionary::DataDictionary()
 : m_hasVersion( false ), m_checkFieldsOutOfOrder( true ),
-  m_checkFieldsHaveValues( true ), m_checkUserDefinedFields( true )
+  m_checkFieldsHaveValues( true ), m_checkUserDefinedFields( true ), m_allowUnknownMessageFields( false ), m_storeMsgFieldsOrder(false)
 {}
 
-DataDictionary::DataDictionary( std::istream& stream )
-throw( ConfigError )
+DataDictionary::DataDictionary( std::istream& stream, bool preserveMsgFldsOrder )
+EXCEPT ( ConfigError )
 : m_hasVersion( false ), m_checkFieldsOutOfOrder( true ),
-  m_checkFieldsHaveValues( true ), m_checkUserDefinedFields( true )
+  m_checkFieldsHaveValues( true ), m_checkUserDefinedFields( true ), m_allowUnknownMessageFields( false ), m_storeMsgFieldsOrder(preserveMsgFldsOrder)
 {
   readFromStream( stream );
 }
 
-DataDictionary::DataDictionary( const std::string& url )
-throw( ConfigError )
+DataDictionary::DataDictionary( const std::string& url, bool preserveMsgFldsOrder )
+EXCEPT ( ConfigError )
 : m_hasVersion( false ), m_checkFieldsOutOfOrder( true ),
-  m_checkFieldsHaveValues( true ), m_checkUserDefinedFields( true ),
-  m_orderedFieldsArray(0)
+  m_checkFieldsHaveValues( true ), m_checkUserDefinedFields( true ), m_allowUnknownMessageFields( false ), m_storeMsgFieldsOrder(preserveMsgFldsOrder), m_orderedFieldsArray(0)
 {
   readFromURL( url );
 }
@@ -83,7 +82,9 @@ DataDictionary& DataDictionary::operator=( const DataDictionary& rhs )
   m_hasVersion = rhs.m_hasVersion;
   m_checkFieldsOutOfOrder = rhs.m_checkFieldsOutOfOrder;
   m_checkFieldsHaveValues = rhs.m_checkFieldsHaveValues;
+  m_storeMsgFieldsOrder = rhs.m_storeMsgFieldsOrder;
   m_checkUserDefinedFields = rhs.m_checkUserDefinedFields;
+  m_allowUnknownMessageFields = rhs.m_allowUnknownMessageFields;
   m_beginString = rhs.m_beginString;
   m_messageFields = rhs.m_messageFields;
   m_requiredFields = rhs.m_requiredFields;
@@ -99,6 +100,11 @@ DataDictionary& DataDictionary::operator=( const DataDictionary& rhs )
   m_names = rhs.m_names;
   m_valueNames = rhs.m_valueNames;
   m_dataFields = rhs.m_dataFields;
+  m_headerOrderedFields = rhs.m_headerOrderedFields;
+  m_headerOrder = rhs.m_headerOrder;
+  m_trailerOrderedFields = rhs.m_trailerOrderedFields;
+  m_trailerOrder = rhs.m_trailerOrder;
+  m_messageOrderedFields = rhs.m_messageOrderedFields;
 
   FieldToGroup::const_iterator i = rhs.m_groups.begin();
   for ( ; i != rhs.m_groups.end(); ++i )
@@ -117,11 +123,19 @@ DataDictionary& DataDictionary::operator=( const DataDictionary& rhs )
 void DataDictionary::validate( const Message& message,
                                const DataDictionary* const pSessionDD,
                                const DataDictionary* const pAppDD )
-throw( FIX::Exception )
+EXCEPT ( FIX::Exception )
 {  
   const Header& header = message.getHeader();
   const BeginString& beginString = FIELD_GET_REF( header, BeginString );
+#ifdef HAVE_EMX
+  const std::string & msgType = message.getSubMessageType();
+  if (msgType.empty())
+  {
+    throw InvalidMessageType("empty subMsgType, check Tag 9426/MESSAGE_ID");
+  }
+#else
   const MsgType& msgType = FIELD_GET_REF( header, MsgType );
+#endif
   if ( pSessionDD != 0 && pSessionDD->m_hasVersion )
   {
     if( pSessionDD->getVersion() != beginString )
@@ -160,10 +174,10 @@ void DataDictionary::iterate( const FieldMap& map, const MsgType& msgType ) cons
 {
   int lastField = 0;
 
-  FieldMap::iterator i;
+  FieldMap::const_iterator i;
   for ( i = map.begin(); i != map.end(); ++i )
   {
-    const FieldBase& field = i->second;
+    const FieldBase& field = (*i);
     if( i != map.begin() && (field.getTag() == lastField) )
       throw RepeatedTag( lastField );
     checkHasValue( field );
@@ -189,9 +203,9 @@ void DataDictionary::iterate( const FieldMap& map, const MsgType& msgType ) cons
 }
 
 void DataDictionary::readFromURL( const std::string& url )
-throw( ConfigError )
+EXCEPT ( ConfigError )
 {
-  DOMDocumentPtr pDoc = DOMDocumentPtr(new PUGIXML_DOMDocument());
+  DOMDocumentPtr pDoc(new PUGIXML_DOMDocument());
 
   if(!pDoc->load(url))
     throw ConfigError(url + ": Could not parse data dictionary file");
@@ -207,9 +221,9 @@ throw( ConfigError )
 }
 
 void DataDictionary::readFromStream( std::istream& stream )
-throw( ConfigError )
+EXCEPT ( ConfigError )
 {
-  DOMDocumentPtr pDoc = DOMDocumentPtr(new PUGIXML_DOMDocument());
+  DOMDocumentPtr pDoc(new PUGIXML_DOMDocument());
 
   if(!pDoc->load(stream))
     throw ConfigError("Could not parse data dictionary stream");
@@ -217,8 +231,8 @@ throw( ConfigError )
   readFromDocument( pDoc );
 }
 
-void DataDictionary::readFromDocument( DOMDocumentPtr pDoc )
-throw( ConfigError )
+void DataDictionary::readFromDocument( const DOMDocumentPtr &pDoc )
+EXCEPT ( ConfigError )
 {
   // VERSION
   DOMNodePtr pFixNode = pDoc->getNode("/fix");
@@ -372,7 +386,7 @@ throw( ConfigError )
       DOMAttributesPtr attrs = pMessageNode->getAttributes();
       std::string msgtype;
       if(!attrs->get("msgtype", msgtype))
-        throw ConfigError("<field> does not have a name attribute");
+        throw ConfigError("<message> does not have a msgtype attribute");
       addMsgType(msgtype);
 
       std::string name;
@@ -441,6 +455,55 @@ message_order const& DataDictionary::getOrderedFields() const
   return m_orderedFieldsArray;
 }
 
+message_order const& DataDictionary::getHeaderOrderedFields() const EXCEPT ( ConfigError )
+{
+  if( m_headerOrder ) return m_headerOrder;
+
+  if (m_headerOrderedFields.size() == 0)
+    throw ConfigError("<Header> does not have a stored message order");
+
+  int * tmp = new int[m_headerOrderedFields.size() + 1];
+  int * i = tmp;
+
+  OrderedFields::const_iterator iter;
+  for( iter = m_headerOrderedFields.begin(); iter != m_headerOrderedFields.end(); *(i++) = *(iter++) ) {}
+  *i = 0;
+
+  m_headerOrder = message_order(tmp);
+  delete [] tmp;
+
+  return m_headerOrder;
+}
+
+message_order const& DataDictionary::getTrailerOrderedFields() const EXCEPT ( ConfigError )
+{
+  if( m_trailerOrder ) return m_trailerOrder;
+
+  if (m_trailerOrderedFields.size() == 0)
+    throw ConfigError("<Trailer> does not have a stored message order");
+
+  int * tmp = new int[m_trailerOrderedFields.size() + 1];
+  int * i = tmp;
+
+  OrderedFields::const_iterator iter;
+  for( iter = m_trailerOrderedFields.begin(); iter != m_trailerOrderedFields.end(); *(i++) = *(iter++) ) {}
+  *i = 0;
+
+  m_trailerOrder = message_order(tmp);
+  delete [] tmp;
+
+  return m_trailerOrder;
+}
+
+const message_order &DataDictionary::getMessageOrderedFields(const std::string & msgType) const EXCEPT ( ConfigError )
+{
+  MsgTypeToOrderedFields::const_iterator iter = m_messageOrderedFields.find(msgType);
+  if (iter == m_messageOrderedFields.end())
+    throw ConfigError("<Message> " + msgType + " does not have a stored message order");
+
+  return iter->second.getMessageOrder();
+}
+
 int DataDictionary::lookupXMLFieldNumber( DOMDocument* pDoc, DOMNode* pNode ) const
 {
   DOMAttributesPtr attrs = pNode->getAttributes();
@@ -474,7 +537,7 @@ int DataDictionary::addXMLComponentFields( DOMDocument* pDoc, DOMNode* pNode,
   DOMNodePtr pComponentNode =
     pDoc->getNode("/fix/components/component[@name='" + name + "']");
   if(pComponentNode.get() == 0)
-    throw ConfigError("Component not found");
+    throw ConfigError("Component not found: " + name);
 
   DOMNodePtr pComponentFieldNode = pComponentNode->getFirstChildNode();
   while(pComponentFieldNode.get())

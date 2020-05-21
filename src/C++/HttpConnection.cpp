@@ -33,7 +33,7 @@ using namespace HTML;
 
 namespace FIX
 {
-HttpConnection::HttpConnection( int s )
+HttpConnection::HttpConnection(socket_handle s )
 : m_socket( s )
 {
   FD_ZERO( &m_fds );
@@ -66,7 +66,7 @@ bool HttpConnection::read()
     if( result > 0 ) // Something to read
     {
       // We can read without blocking
-      ssize_t size = recv( m_socket, m_buffer, sizeof(m_buffer), 0 );
+      ssize_t size = socket_recv( m_socket, m_buffer, sizeof(m_buffer) );
       if ( size <= 0 ) { throw SocketRecvFailed( size ); }
       m_parser.addToStream( m_buffer, size );
     }
@@ -91,7 +91,7 @@ bool HttpConnection::read()
 }
 
 bool HttpConnection::readMessage( std::string& msg )
-throw( SocketRecvFailed )
+EXCEPT ( SocketRecvFailed )
 {
   try
   {

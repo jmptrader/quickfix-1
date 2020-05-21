@@ -30,14 +30,31 @@
 
 namespace FIX
 {
-std::auto_ptr<DataDictionary> Message::s_dataDictionary;
+
+int const headerOrder[] =
+{
+  FIELD::BeginString,
+  FIELD::BodyLength,
+  FIELD::MsgType
+};
+
+SmartPtr<DataDictionary> Message::s_dataDictionary;
 
 Message::Message()
-: m_validStructure( true ) {}
+: m_validStructure( true )
+, m_tag( 0 )
+{
+  
+}
+
+Message::Message(const message_order &hdrOrder, const message_order &trlOrder, const message_order& order)
+: FieldMap(order), m_header(hdrOrder),
+  m_trailer(trlOrder), m_validStructure( true ) {}
 
 Message::Message( const std::string& string, bool validate )
-throw( InvalidMessage )
+EXCEPT ( InvalidMessage )
 : m_validStructure( true )
+, m_tag( 0 )
 {
   setString( string, validate );
 }
@@ -45,8 +62,9 @@ throw( InvalidMessage )
 Message::Message( const std::string& string,
                   const DataDictionary& dataDictionary,
                   bool validate )
-throw( InvalidMessage )
+EXCEPT ( InvalidMessage )
 : m_validStructure( true )
+, m_tag( 0 )
 {
   setString( string, validate, &dataDictionary, &dataDictionary );
 }
@@ -55,8 +73,36 @@ Message::Message( const std::string& string,
                   const DataDictionary& sessionDataDictionary,
                   const DataDictionary& applicationDataDictionary,
                   bool validate )
-throw( InvalidMessage )
+EXCEPT ( InvalidMessage )
 : m_validStructure( true )
+, m_tag( 0 )
+{
+    setString( string, validate, &sessionDataDictionary, &applicationDataDictionary );
+}
+
+Message::Message( const message_order &hdrOrder,
+                  const message_order &trlOrder,
+                  const message_order& order,
+                  const std::string& string,
+                  const DataDictionary& dataDictionary,
+                  bool validate )
+EXCEPT ( InvalidMessage )
+: FieldMap(order), m_header(hdrOrder),
+  m_trailer(trlOrder), m_validStructure( true )
+{
+  setString( string, validate, &dataDictionary, &dataDictionary );
+}
+
+Message::Message( const message_order &hdrOrder,
+                  const message_order &trlOrder,
+                  const message_order& order,
+                  const std::string& string,
+                  const DataDictionary& sessionDataDictionary,
+                  const DataDictionary& applicationDataDictionary,
+                  bool validate )
+EXCEPT ( InvalidMessage )
+: FieldMap(order), m_header(hdrOrder),
+  m_trailer(trlOrder), m_validStructure( true )
 {
   setStringHeader( string );
   if( isAdmin() )
@@ -65,13 +111,36 @@ throw( InvalidMessage )
     setString( string, validate, &sessionDataDictionary, &applicationDataDictionary );
 }
 
+Message::Message( const BeginString& beginString, const MsgType& msgType )
+: m_validStructure(true)
+, m_tag( 0 )
+{
+  m_header.setField(beginString);
+  m_header.setField(msgType);
+}
+
+Message::Message(const Message& copy)
+: FieldMap(copy)
+, m_header(copy.m_header)
+, m_trailer(copy.m_trailer)
+, m_validStructure(copy.m_validStructure)
+, m_tag(copy.m_tag)
+#ifdef HAVE_EMX
+, m_subMsgType(copy.m_subMsgType)
+#endif
+{
+
+}
+
+Message::~Message()
+{
+}
+
 bool Message::InitializeXML( const std::string& url )
 {
   try
   {
-    std::auto_ptr<DataDictionary> p =
-      std::auto_ptr<DataDictionary>(new DataDictionary(url));
-    s_dataDictionary = p;
+    s_dataDictionary.reset(new DataDictionary(url));
     return true;
   }
   catch( ConfigError& )
@@ -169,7 +238,8 @@ std::string Message::toString( int beginStringField,
                                int checkSumField ) const
 {
   std::string str;
-  return toString( str, beginStringField, bodyLengthField, checkSumField );
+  toString( str, beginStringField, bodyLengthField, checkSumField );
+  return str;
 }
 
 std::string& Message::toString( std::string& str, 
@@ -200,7 +270,8 @@ std::string& Message::toString( std::string& str,
 std::string Message::toXML() const
 {
   std::string str;
-  return toXML( str );
+  toXML( str );
+  return str;
 }
 
 std::string& Message::toXML( std::string& str ) const
@@ -224,12 +295,12 @@ std::string& Message::toXML( std::string& str ) const
 std::string Message::toXMLFields(const FieldMap& fields, int space) const
 {
   std::stringstream stream;
-  FieldMap::iterator i;
+  FieldMap::const_iterator i;
   std::string name;
   for(i = fields.begin(); i != fields.end(); ++i)
   {
-    int field = i->first;
-    std::string value = i->second.getString();
+    int field = i->getTag();
+    std::string value = i->getString();
 
     stream << std::setw(space) << " " << "<field ";
     if(s_dataDictionary.get() && s_dataDictionary->getFieldName(field, name))
@@ -247,7 +318,7 @@ std::string Message::toXMLFields(const FieldMap& fields, int space) const
     stream << "</field>" << std::endl;
   }
 
-  FieldMap::g_iterator j;
+  FieldMap::g_const_iterator j;
   for(j = fields.g_begin(); j != fields.g_end(); ++j)
   {
     std::vector<FieldMap*>::const_iterator k;
@@ -266,20 +337,14 @@ void Message::setString( const std::string& string,
                          bool doValidation,
                          const DataDictionary* pSessionDataDictionary,
                          const DataDictionary* pApplicationDataDictionary )
-throw( InvalidMessage )
+EXCEPT ( InvalidMessage )
 {
   clear();
 
   std::string::size_type pos = 0;
   int count = 0;
-  std::string msg;
 
-  static int const headerOrder[] =
-  {
-    FIELD::BeginString,
-    FIELD::BodyLength,
-    FIELD::MsgType
-  };
+  FIX::MsgType msg;
 
   field_type type = header;
 
@@ -298,9 +363,30 @@ throw( InvalidMessage )
       }
 
       if ( field.getTag() == FIELD::MsgType )
-        msg = field.getString();
+      {
+        msg.setString( field.getString() );
+        if ( isAdminMsgType( msg ) )
+        {
+          pApplicationDataDictionary = pSessionDataDictionary;
+#ifdef HAVE_EMX
+          m_subMsgType.assign(msg);
+        }
+        else
+        {
+          std::string::size_type equalSign = string.find("\0019426=", pos);
+          if (equalSign == std::string::npos)
+            throw InvalidMessage("EMX message type (9426) not found");
 
-      m_header.setField( field, false );
+          equalSign += 6;
+          std::string::size_type soh = string.find_first_of('\001', equalSign);
+          if (soh == std::string::npos)
+            throw InvalidMessage("EMX message type (9426) soh char not found");
+          m_subMsgType.assign(string.substr(equalSign, soh - equalSign ));
+#endif
+        }
+      }
+
+      m_header.appendField( field );
 
       if ( pSessionDataDictionary )
         setGroup( "_header_", field, string, pos, getHeader(), *pSessionDataDictionary );
@@ -308,7 +394,7 @@ throw( InvalidMessage )
     else if ( isTrailerField( field, pSessionDataDictionary ) )
     {
       type = trailer;
-      m_trailer.setField( field, false );
+      m_trailer.appendField( field );
 
       if ( pSessionDataDictionary )
         setGroup( "_trailer_", field, string, pos, getTrailer(), *pSessionDataDictionary );
@@ -322,12 +408,21 @@ throw( InvalidMessage )
       }
 
       type = body;
-      setField( field, false );
+      appendField( field );
 
       if ( pApplicationDataDictionary )
+#ifdef HAVE_EMX
+        setGroup(m_subMsgType, field, string, pos, *this, *pApplicationDataDictionary);
+#else
         setGroup( msg, field, string, pos, *this, *pApplicationDataDictionary );
+#endif
     }
   }
+
+  // sort fields
+  m_header.sortFields();
+  sortFields();
+  m_trailer.sortFields();
 
   if ( doValidation )
     validate();
@@ -342,7 +437,7 @@ void Message::setGroup( const std::string& msg, const FieldBase& field,
   int delim;
   const DataDictionary* pDD = 0;
   if ( !dataDictionary.getGroup( msg, group, delim, pDD ) ) return ;
-  std::auto_ptr<Group> pGroup;
+  SmartPtr<Group> pGroup;
 
   while ( pos < string.size() )
   {
@@ -372,7 +467,7 @@ void Message::setGroup( const std::string& msg, const FieldBase& field,
     }
 
     if ( !pGroup.get() ) return ;
-    pGroup->setField( field, false );
+    pGroup->addField( field );
     setGroup( msg, field, string, pos, *pGroup, *pDD );
   }
 }
@@ -391,9 +486,11 @@ bool Message::setStringHeader( const std::string& string )
       return false;
 
     if ( isHeaderField( field ) )
-      m_header.setField( field, false );
+      m_header.appendField( field );
     else break;
   }
+
+  m_header.sortFields();
   return true;
 }
 
@@ -439,8 +536,14 @@ bool Message::isHeaderField( int field )
 bool Message::isHeaderField( const FieldBase& field,
                              const DataDictionary* pD )
 {
-  if ( isHeaderField( field.getTag() ) ) return true;
-  if ( pD ) return pD->isHeaderField( field.getTag() );
+  return isHeaderField( field.getTag(), pD );
+}
+
+bool Message::isHeaderField( int field, 
+                             const DataDictionary * pD )
+{
+  if ( isHeaderField( field ) ) return true;
+  if ( pD ) return pD->isHeaderField( field );
   return false;
 }
 
@@ -460,13 +563,18 @@ bool Message::isTrailerField( int field )
 bool Message::isTrailerField( const FieldBase& field,
                               const DataDictionary* pD )
 {
-  if ( isTrailerField( field.getTag() ) ) return true;
-  if ( pD ) return pD->isTrailerField( field.getTag() );
+  return isTrailerField( field.getTag(), pD );
+}
+
+bool Message::isTrailerField( int field, const DataDictionary * pD )
+{
+  if ( isTrailerField( field ) ) return true;
+  if ( pD ) return pD->isTrailerField( field );
   return false;
 }
 
 SessionID Message::getSessionID( const std::string& qualifier ) const
-throw( FieldNotFound )
+EXCEPT ( FieldNotFound )
 {
   BeginString beginString;
   SenderCompID senderCompID;
@@ -486,7 +594,7 @@ void Message::setSessionID( const SessionID& sessionID )
   getHeader().setField( sessionID.getTargetCompID() );
 }
 
-void Message::validate()
+void Message::validate() const
 {
   try
   {
@@ -530,7 +638,7 @@ void Message::validate()
 
 FIX::FieldBase Message::extractField( const std::string& string, std::string::size_type& pos, 
                                       const DataDictionary* pSessionDD /*= 0*/, const DataDictionary* pAppDD /*= 0*/, 
-                                      const Group* pGroup /*= 0*/ )
+                                      const Group* pGroup /*= 0*/ ) const
 {
   std::string::const_iterator const tagStart = string.begin() + pos;
   std::string::const_iterator const strEnd = string.end();
@@ -540,7 +648,8 @@ FIX::FieldBase Message::extractField( const std::string& string, std::string::si
     throw InvalidMessage("Equal sign not found in field");
 
   int field = 0;
-  IntConvertor::convert( tagStart, equalSign, field );
+  if( !IntConvertor::convert( tagStart, equalSign, field ) )
+    throw InvalidMessage( std::string("Field tag is invalid: ") + std::string( tagStart, equalSign ));
 
   std::string::const_iterator const valueStart = equalSign + 1;
 
@@ -555,32 +664,39 @@ FIX::FieldBase Message::extractField( const std::string& string, std::string::si
     // Special case for Signature which violates above assumption.
     if ( field == FIELD::Signature ) lenField = FIELD::SignatureLength;
 
-    if ( pGroup && pGroup->isSetField( lenField ) )
+    // identify part of the message that should contain length field
+    const FieldMap * location = pGroup;
+    if ( !location )
     {
-      const std::string& fieldLength = pGroup->getField( lenField );
-      soh = valueStart + atol( fieldLength.c_str() );
-    }
-    else
-    {
-      FIX::FieldMap *lenMap;
-      if ( isHeaderField( lenField ) )
-      {
-          lenMap = &m_header;
-      }
+      if ( isHeaderField( lenField, pSessionDD ) )
+        location = &m_header;
+      else if ( isTrailerField( lenField, pSessionDD ) )
+        location = &m_trailer;
       else
-      {
-          lenMap = this;
-      }
-      if ( lenMap->isSetField( lenField ) )
-      {
-        const std::string& fieldLength = lenMap->getField( lenField );
-        soh = valueStart + atol( fieldLength.c_str() );
-      }
+        location = this;
+    }
+
+    try
+    {
+      const FieldBase& fieldLength = location->reverse_find( lenField );
+      soh = valueStart + IntConvertor::convert( fieldLength.getString() );
+    }
+    catch( FieldNotFound& )
+    {
+      throw InvalidMessage( std::string( "Data length field " ) + IntConvertor::convert( lenField ) + std::string( " was not found for data field " ) + IntConvertor::convert( field ) );
+    }
+    catch( FieldConvertError& e )
+    {
+      throw InvalidMessage( std::string( "Unable to determine SOH for data field " ) + IntConvertor::convert( field ) + std::string( ": " ) + e.what() );
     }
   }
 
   std::string::const_iterator const tagEnd = soh + 1;
+#if defined(__SUNPRO_CC)
+  std::distance( string.begin(), tagEnd, pos );
+#else
   pos = std::distance( string.begin(), tagEnd );
+#endif
 
   return FieldBase (
     field,
@@ -589,4 +705,5 @@ FIX::FieldBase Message::extractField( const std::string& string, std::string::si
     tagStart, 
     tagEnd );
 }
+
 }

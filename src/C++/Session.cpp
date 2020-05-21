@@ -58,7 +58,7 @@ Session::Session( Application& application,
   m_resetOnLogout( false ), 
   m_resetOnDisconnect( false ),
   m_refreshOnLogon( false ),
-  m_millisecondsInTimeStamp( true ),
+  m_timestampPrecision( 3 ),
   m_persistMessages( true ),
   m_validateLengthAndChecksum( true ),
   m_dataDictionaryProvider( dataDictionaryProvider ),
@@ -97,7 +97,7 @@ void Session::insertSendingTime( Header& header )
   else
     showMilliseconds = m_sessionID.getBeginString() >= BeginString_FIX42;
 
-  header.setField( SendingTime(now, showMilliseconds && m_millisecondsInTimeStamp) );
+  header.setField( SendingTime(now, showMilliseconds ? m_timestampPrecision : 0) );
 }
 
 void Session::insertOrigSendingTime( Header& header, const UtcTimeStamp& when )
@@ -108,7 +108,7 @@ void Session::insertOrigSendingTime( Header& header, const UtcTimeStamp& when )
   else
     showMilliseconds = m_sessionID.getBeginString() >= BeginString_FIX42;
 
-  header.setField( OrigSendingTime(when, showMilliseconds && m_millisecondsInTimeStamp) );
+  header.setField( OrigSendingTime(when, showMilliseconds ? m_timestampPrecision : 0) );
 }
 
 void Session::fill( Header& header )
@@ -381,29 +381,69 @@ void Session::nextResendRequest( const Message& resendRequest, const UtcTimeStam
   int begin = 0;
   int current = beginSeqNo;
   std::string messageString;
-  Message msg;
 
   for ( i = messages.begin(); i != messages.end(); ++i )
   {
-    const DataDictionary& sessionDD = 
+    SmartPtr<FIX::Message> pMsg;
+    std::string strMsgType;
+    const DataDictionary& sessionDD =
       m_dataDictionaryProvider.getSessionDataDictionary(m_sessionID.getBeginString());
+    if (sessionDD.isMessageFieldsOrderPreserved())
+    {
+      std::string::size_type equalSign = (*i).find("\00135=");
+      equalSign += 4;
+      std::string::size_type soh = (*i).find_first_of('\001', equalSign);
+      strMsgType = (*i).substr(equalSign, soh - equalSign);
+#ifdef HAVE_EMX
+      if (FIX::Message::isAdminMsgType(strMsgType) == false)
+      {
+        equalSign = (*i).find("\0019426=", soh);
+        if (equalSign == std::string::npos)
+          throw FIX::IOException("EMX message type (9426) not found");
+
+        equalSign += 6;
+        soh = (*i).find_first_of('\001', equalSign);
+        if (soh == std::string::npos)
+          throw FIX::IOException("EMX message type (9426) soh char not found");
+        strMsgType.assign((*i).substr(equalSign, soh - equalSign));
+      }
+#endif
+    }
 
     if( m_sessionID.isFIXT() )
     {
+      Message msg;
       msg.setStringHeader(*i);
       ApplVerID applVerID;
       if( !msg.getHeader().getFieldIfSet(applVerID) )
         applVerID = m_senderDefaultApplVerID;
 
       const DataDictionary& applicationDD =
-        m_dataDictionaryProvider.getApplicationDataDictionary(applVerID);
-      msg = Message( *i, sessionDD, applicationDD, m_validateLengthAndChecksum );
+          m_dataDictionaryProvider.getApplicationDataDictionary(applVerID);
+      if (strMsgType.empty())
+        pMsg.reset( new Message( *i, sessionDD, applicationDD, m_validateLengthAndChecksum ));
+      else
+      {
+        const message_order & headerOrder = sessionDD.getHeaderOrderedFields();
+        const message_order & trailerOrder = sessionDD.getTrailerOrderedFields();
+        const message_order & messageOrder = applicationDD.getMessageOrderedFields(strMsgType);
+        pMsg.reset( new Message( headerOrder, trailerOrder, messageOrder, *i, sessionDD, applicationDD, m_validateLengthAndChecksum ));
+      }
     }
     else
     {
-      msg = Message( *i, sessionDD, m_validateLengthAndChecksum );
+      if (strMsgType.empty())
+        pMsg.reset( new Message( *i, sessionDD, m_validateLengthAndChecksum ));
+      else
+      {
+        const message_order & headerOrder = sessionDD.getHeaderOrderedFields();
+        const message_order & trailerOrder = sessionDD.getTrailerOrderedFields();
+        const message_order & messageOrder = sessionDD.getMessageOrderedFields(strMsgType);
+        pMsg.reset(new Message(headerOrder, trailerOrder, messageOrder, *i, sessionDD, m_validateLengthAndChecksum ));
+      }
     }
 
+    Message & msg = *pMsg;
 
     msg.getHeader().getField( msgSeqNum );
     msg.getHeader().getField( msgType );
@@ -447,6 +487,37 @@ void Session::nextResendRequest( const Message& resendRequest, const UtcTimeStam
   resendRequest.getHeader().getField( msgSeqNum );
   if( !isTargetTooHigh(msgSeqNum) && !isTargetTooLow(msgSeqNum) )
     m_state.incrNextTargetMsgSeqNum();
+}
+
+Message * Session::newMessage(const std::string & msgType) const
+{
+  Message * msg = 0;
+
+  const DataDictionary& sessionDD =
+    m_dataDictionaryProvider.getSessionDataDictionary(m_sessionID.getBeginString());
+  if (!sessionDD.isMessageFieldsOrderPreserved())
+  {
+    msg = new Message();
+  }
+  else
+  {
+    const message_order & headerOrder = sessionDD.getHeaderOrderedFields();
+    const message_order & trailerOrder = sessionDD.getTrailerOrderedFields();
+    if (!m_sessionID.isFIXT() || Message::isAdminMsgType(msgType) )
+    {
+      const message_order & messageOrder = sessionDD.getMessageOrderedFields(msgType);
+      msg = new Message(headerOrder, trailerOrder, messageOrder);
+    }
+    else
+    {
+      const DataDictionary& applicationDD =
+        m_dataDictionaryProvider.getApplicationDataDictionary(m_senderDefaultApplVerID);
+      const message_order & messageOrder = applicationDD.getMessageOrderedFields(msgType);
+      msg = new Message(headerOrder, trailerOrder, messageOrder);
+    }
+  }
+
+  return msg;
 }
 
 bool Session::send( Message& message )
@@ -590,7 +661,7 @@ bool Session::resend( Message& message )
 }
 
 void Session::persist( const Message& message,  const std::string& messageString ) 
-throw ( IOException )
+EXCEPT ( IOException )
 {
   MsgSeqNum msgSeqNum;
   message.getHeader().getField( msgSeqNum );
@@ -601,7 +672,9 @@ throw ( IOException )
 
 void Session::generateLogon()
 {
-  Message logon;
+  SmartPtr<Message> pMsg(newMessage("A"));
+  Message & logon = *pMsg;
+
   logon.getHeader().setField( MsgType( "A" ) );
   logon.setField( EncryptMethod( 0 ) );
   logon.setField( m_state.heartBtInt() );
@@ -624,7 +697,9 @@ void Session::generateLogon()
 
 void Session::generateLogon( const Message& aLogon )
 {
-  Message logon;
+  SmartPtr<Message> pMsg(newMessage("A"));
+  Message & logon = *pMsg;
+
   EncryptMethod encryptMethod;
   HeartBtInt heartBtInt;
   logon.setField( EncryptMethod( 0 ) );
@@ -642,7 +717,9 @@ void Session::generateLogon( const Message& aLogon )
 
 void Session::generateResendRequest( const BeginString& beginString, const MsgSeqNum& msgSeqNum )
 {
-  Message resendRequest;
+  SmartPtr<Message> pMsg(newMessage("2"));
+  Message & resendRequest = *pMsg;
+
   BeginSeqNo beginSeqNo( ( int ) getExpectedTargetNum() );
   EndSeqNo endSeqNo( msgSeqNum - 1 );
   if ( beginString >= FIX::BeginString_FIX42 )
@@ -665,7 +742,9 @@ void Session::generateResendRequest( const BeginString& beginString, const MsgSe
 void Session::generateSequenceReset
 ( int beginSeqNo, int endSeqNo )
 {
-  Message sequenceReset;
+  SmartPtr<Message> pMsg(newMessage("4"));
+  Message & sequenceReset = *pMsg;
+
   NewSeqNo newSeqNo( endSeqNo );
   sequenceReset.getHeader().setField( MsgType( "4" ) );
   sequenceReset.getHeader().setField( PossDupFlag( true ) );
@@ -684,7 +763,9 @@ void Session::generateSequenceReset
 
 void Session::generateHeartbeat()
 {
-  Message heartbeat;
+  SmartPtr<Message> pMsg(newMessage("0"));
+  Message & heartbeat = *pMsg;
+
   heartbeat.getHeader().setField( MsgType( "0" ) );
   fill( heartbeat.getHeader() );
   sendRaw( heartbeat );
@@ -692,7 +773,9 @@ void Session::generateHeartbeat()
 
 void Session::generateHeartbeat( const Message& testRequest )
 {
-  Message heartbeat;
+  SmartPtr<Message> pMsg(newMessage("0"));
+  Message & heartbeat = *pMsg;
+
   heartbeat.getHeader().setField( MsgType( "0" ) );
   fill( heartbeat.getHeader() );
   try
@@ -708,7 +791,9 @@ void Session::generateHeartbeat( const Message& testRequest )
 
 void Session::generateTestRequest( const std::string& id )
 {
-  Message testRequest;
+  SmartPtr<Message> pMsg(newMessage("1"));
+  Message & testRequest = *pMsg;
+
   testRequest.getHeader().setField( MsgType( "1" ) );
   fill( testRequest.getHeader() );
   TestReqID testReqID( id );
@@ -721,7 +806,9 @@ void Session::generateReject( const Message& message, int err, int field )
 {
   std::string beginString = m_sessionID.getBeginString();
 
-  Message reject;
+  SmartPtr<Message> pMsg(newMessage("3"));
+  Message & reject = *pMsg;
+
   reject.getHeader().setField( MsgType( "3" ) );
   reject.reverseRoute( message.getHeader() );
   fill( reject.getHeader() );
@@ -816,7 +903,9 @@ void Session::generateReject( const Message& message, const std::string& str )
 {
   std::string beginString = m_sessionID.getBeginString();
 
-  Message reject;
+  SmartPtr<Message> pMsg(newMessage("3"));
+  Message & reject = *pMsg;
+
   reject.getHeader().setField( MsgType( "3" ) );
   reject.reverseRoute( message.getHeader() );
   fill( reject.getHeader() );
@@ -841,7 +930,9 @@ void Session::generateReject( const Message& message, const std::string& str )
 
 void Session::generateBusinessReject( const Message& message, int err, int field )
 {
-  Message reject;
+  SmartPtr<Message> pMsg(newMessage("j"));
+  Message & reject = *pMsg;
+
   reject.getHeader().setField( MsgType( MsgType_BusinessMessageReject ) );
   if( m_sessionID.isFIXT() )
     reject.setField( DefaultApplVerID(m_senderDefaultApplVerID) );  
@@ -904,7 +995,9 @@ void Session::generateBusinessReject( const Message& message, int err, int field
 
 void Session::generateLogout( const std::string& text )
 {
-  Message logout;
+  SmartPtr<Message> pMsg(newMessage("5"));
+  Message & logout = *pMsg;
+
   logout.getHeader().setField( MsgType( MsgType_Logout ) );
   fill( logout.getHeader() );
   if ( text.length() )
@@ -1263,7 +1356,7 @@ void Session::next( const Message& message, const UtcTimeStamp& timeStamp, bool 
     else if ( msgType == MsgType_Logout )
       nextLogout( message, timeStamp );
     else if ( msgType == MsgType_ResendRequest )
-      nextResendRequest( message,timeStamp );
+      nextResendRequest( message, timeStamp );
     else if ( msgType == MsgType_Reject )
       nextReject( message, timeStamp );
     else
@@ -1349,7 +1442,7 @@ void Session::next( const Message& message, const UtcTimeStamp& timeStamp, bool 
 }
 
 bool Session::sendToTarget( Message& message, const std::string& qualifier )
-throw( SessionNotFound )
+EXCEPT ( SessionNotFound )
 {
   try
   {
@@ -1360,7 +1453,7 @@ throw( SessionNotFound )
 }
 
 bool Session::sendToTarget( Message& message, const SessionID& sessionID )
-throw( SessionNotFound )
+EXCEPT ( SessionNotFound )
 {
   message.setSessionID( sessionID );
   Session* pSession = lookupSession( sessionID );
@@ -1373,7 +1466,7 @@ bool Session::sendToTarget
   const SenderCompID& senderCompID,
   const TargetCompID& targetCompID,
   const std::string& qualifier )
-throw( SessionNotFound )
+EXCEPT ( SessionNotFound )
 {
   message.getHeader().setField( senderCompID );
   message.getHeader().setField( targetCompID );
@@ -1383,7 +1476,7 @@ throw( SessionNotFound )
 bool Session::sendToTarget
 ( Message& message, const std::string& sender, const std::string& target,
   const std::string& qualifier )
-throw( SessionNotFound )
+EXCEPT ( SessionNotFound )
 {
   return sendToTarget( message, SenderCompID( sender ),
                        TargetCompID( target ), qualifier );

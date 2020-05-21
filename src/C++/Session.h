@@ -63,13 +63,13 @@ public:
   bool sentLogout() { return m_state.sentLogout(); }
   bool receivedLogon() { return m_state.receivedLogon(); }
   bool isLoggedOn() { return receivedLogon() && sentLogon(); }
-  void reset() throw( IOException ) 
+  void reset() EXCEPT ( IOException ) 
   { generateLogout(); disconnect(); m_state.reset(); }
-  void refresh() throw( IOException )
+  void refresh() EXCEPT ( IOException )
   { m_state.refresh(); }
-  void setNextSenderMsgSeqNum( int num ) throw( IOException )
+  void setNextSenderMsgSeqNum( int num ) EXCEPT ( IOException )
   { m_state.setNextSenderMsgSeqNum( num ); }
-  void setNextTargetMsgSeqNum( int num ) throw( IOException )
+  void setNextTargetMsgSeqNum( int num ) EXCEPT ( IOException )
   { m_state.setNextTargetMsgSeqNum( num ); }
 
   const SessionID& getSessionID() const
@@ -81,19 +81,19 @@ public:
 
   static bool sendToTarget( Message& message,
                             const std::string& qualifier = "" )
-  throw( SessionNotFound );
+  EXCEPT ( SessionNotFound );
   static bool sendToTarget( Message& message, const SessionID& sessionID )
-  throw( SessionNotFound );
+  EXCEPT ( SessionNotFound );
   static bool sendToTarget( Message&,
                             const SenderCompID& senderCompID,
                             const TargetCompID& targetCompID,
                             const std::string& qualifier = "" )
-  throw( SessionNotFound );
+  EXCEPT ( SessionNotFound );
   static bool sendToTarget( Message& message,
                             const std::string& senderCompID,
                             const std::string& targetCompID,
                             const std::string& qualifier = "" )
-  throw( SessionNotFound );
+  EXCEPT ( SessionNotFound );
 
   static std::set<SessionID> getSessions();
   static bool doesSessionExist( const SessionID& );
@@ -180,9 +180,22 @@ public:
     { m_refreshOnLogon = value; } 
 
   bool getMillisecondsInTimeStamp()
-    { return m_millisecondsInTimeStamp; }
+    { return (m_timestampPrecision == 3); }
   void setMillisecondsInTimeStamp ( bool value )
-    { m_millisecondsInTimeStamp = value; }
+    { if (value)
+        m_timestampPrecision = 3;
+      else
+        m_timestampPrecision = 0;
+    }
+  int getTimestampPrecision()
+    { return m_timestampPrecision; }
+  void setTimestampPrecision(int precision)
+    {
+      if (precision < 0 || precision > 9)
+        return;
+
+      m_timestampPrecision = precision;
+    }
 
   bool getPersistMessages()
     { return m_persistMessages; }
@@ -224,7 +237,7 @@ private:
   bool send( const std::string& );
   bool sendRaw( Message&, int msgSeqNum = 0 );
   bool resend( Message& message );
-  void persist( const Message&, const std::string& ) throw ( IOException );
+  void persist( const Message&, const std::string& ) EXCEPT ( IOException );
 
   void insertSendingTime( Header& );
   void insertOrigSendingTime( Header&,
@@ -298,6 +311,8 @@ private:
   bool set( int s, const Message& m );
   bool get( int s, Message& m ) const;
 
+  Message * newMessage(const std::string & msgType) const;
+
   Application& m_application;
   SessionID m_sessionID;
   TimeRange m_sessionTime;
@@ -313,7 +328,7 @@ private:
   bool m_resetOnLogout;
   bool m_resetOnDisconnect;
   bool m_refreshOnLogon;
-  bool m_millisecondsInTimeStamp;
+  int m_timestampPrecision;
   bool m_persistMessages;
   bool m_validateLengthAndChecksum;
 
@@ -328,7 +343,6 @@ private:
   static SessionIDs s_sessionIDs;
   static Sessions s_registered;
   static Mutex s_mutex;
-
 };
 }
 

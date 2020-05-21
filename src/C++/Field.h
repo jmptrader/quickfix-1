@@ -33,6 +33,10 @@
 #include "FieldTypes.h"
 #include "Utility.h"
 
+#if defined(__SUNPRO_CC)
+#include <algorithm>
+#endif
+
 namespace FIX
 {
 /**
@@ -89,6 +93,32 @@ public:
   {}
 
   virtual ~FieldBase() {}
+
+  FieldBase( const FieldBase& rhs )
+  : m_tag( rhs.getTag() )
+  , m_string( rhs.m_string )
+  , m_metrics( rhs.m_metrics )
+  {
+
+  }
+
+  FieldBase& operator=( const FieldBase& rhs)
+  {
+    m_tag = rhs.getTag();
+    m_string = rhs.m_string;
+    m_metrics = rhs.m_metrics;
+    m_data.clear();
+
+    return *this;
+  }
+
+  void swap( FieldBase& rhs )
+  {
+    std::swap( m_tag, rhs.m_tag );
+    std::swap( m_metrics, rhs.m_metrics );
+    m_string.swap( rhs.m_string );
+    m_data.swap( rhs.m_data );
+  }
 
   void setTag( int tag )
   {
@@ -161,16 +191,16 @@ private:
   /// Serializes string representation of the Field to input string
   void encodeTo( std::string& result ) const
   {
-    size_t tagLength = FIX::number_of_symbols_in( m_tag ) + 1;
-    size_t totalLength = tagLength + m_string.length() + 1;
+    size_t tagLength = FIX::number_of_symbols_in( m_tag );
+    size_t totalLength = tagLength + m_string.length() + 2;
 
     result.resize( totalLength );
 
     char * buf = (char*)result.c_str();
     FIX::integer_to_string( buf, tagLength, m_tag );
 
-    buf[tagLength - 1] = '=';
-    memcpy( buf + tagLength, m_string.data(), m_string.length() );
+    buf[tagLength] = '=';
+    memcpy( buf + tagLength + 1, m_string.data(), m_string.length() );
     buf[totalLength - 1] = '\001';
   }
 
@@ -188,7 +218,13 @@ private:
     for ( std::string::const_iterator str = start; str != end; ++str )
       checksum += (unsigned char)( *str );
 
+#if defined(__SUNPRO_CC)
+    std::ptrdiff_t d;
+    std::distance(start, end, d);
+    return field_metrics( d, checksum );
+#else
     return field_metrics( std::distance( start, end ), checksum );
+#endif
   }
 
   static field_metrics calculateMetrics( const std::string& field )
@@ -208,6 +244,11 @@ inline std::ostream& operator <<
 {
   stream << field.getString();
   return stream;
+}
+
+inline void swap( FieldBase& lhs, FieldBase& rhs )
+{
+  lhs.swap( rhs );
 }
 
 /**
@@ -329,7 +370,7 @@ public:
 
   void setValue( char value )
     { setString( CharConvertor::convert( value ) ); }
-  char getValue() const throw ( IncorrectDataFormat )
+  char getValue() const EXCEPT ( IncorrectDataFormat )
     { try
       { return CharConvertor::convert( getString() ); }
       catch( FieldConvertError& )
@@ -349,7 +390,7 @@ public:
 
   void setValue( double value, int padding = 0 )
     { setString( DoubleConvertor::convert( value, padding ) ); }
-  double getValue() const throw ( IncorrectDataFormat )
+  double getValue() const EXCEPT ( IncorrectDataFormat )
     { try
       { return DoubleConvertor::convert( getString() ); }
       catch( FieldConvertError& )
@@ -369,7 +410,7 @@ public:
 
   void setValue( int value )
     { setString( IntConvertor::convert( value ) ); }
-  int getValue() const throw ( IncorrectDataFormat )
+  int getValue() const EXCEPT ( IncorrectDataFormat )
     { try
       { return IntConvertor::convert( getString() ); }
       catch( FieldConvertError& )
@@ -389,7 +430,7 @@ public:
 
   void setValue( bool value )
     { setString( BoolConvertor::convert( value ) ); }
-  bool getValue() const throw ( IncorrectDataFormat )
+  bool getValue() const EXCEPT ( IncorrectDataFormat )
     { try
       { return BoolConvertor::convert( getString() ); }
       catch( FieldConvertError& )
@@ -402,14 +443,14 @@ public:
 class UtcTimeStampField : public FieldBase
 {
 public:
-  explicit UtcTimeStampField( int field, const UtcTimeStamp& data, bool showMilliseconds = false )
-: FieldBase( field, UtcTimeStampConvertor::convert( data, showMilliseconds ) ) {}
-  UtcTimeStampField( int field, bool showMilliseconds = false )
-: FieldBase( field, UtcTimeStampConvertor::convert( UtcTimeStamp(), showMilliseconds ) ) {}
+  explicit UtcTimeStampField( int field, const UtcTimeStamp& data, int precision = 0 )
+: FieldBase( field, UtcTimeStampConvertor::convert( data, precision ) ) {}
+  UtcTimeStampField( int field, int precision = 0 )
+: FieldBase( field, UtcTimeStampConvertor::convert( UtcTimeStamp(), precision ) ) {}
 
   void setValue( const UtcTimeStamp& value )
     { setString( UtcTimeStampConvertor::convert( value ) ); }
-  UtcTimeStamp getValue() const throw ( IncorrectDataFormat )
+  UtcTimeStamp getValue() const EXCEPT ( IncorrectDataFormat )
     { try
       { return UtcTimeStampConvertor::convert( getString() ); }
       catch( FieldConvertError& )
@@ -436,7 +477,7 @@ public:
 
   void setValue( const UtcDate& value )
     { setString( UtcDateConvertor::convert( value ) ); }
-  UtcDate getValue() const throw ( IncorrectDataFormat )
+  UtcDate getValue() const EXCEPT ( IncorrectDataFormat )
     { try
       { return UtcDateConvertor::convert( getString() ); }
       catch( FieldConvertError& )
@@ -456,14 +497,14 @@ public:
 class UtcTimeOnlyField : public FieldBase
 {
 public:
-  explicit UtcTimeOnlyField( int field, const UtcTimeOnly& data, bool showMilliseconds = false )
-: FieldBase( field, UtcTimeOnlyConvertor::convert( data, showMilliseconds ) ) {}
-  UtcTimeOnlyField( int field, bool showMilliseconds = false )
-: FieldBase( field, UtcTimeOnlyConvertor::convert( UtcTimeOnly(), showMilliseconds ) ) {}
+  explicit UtcTimeOnlyField( int field, const UtcTimeOnly& data, int precision = 0 )
+: FieldBase( field, UtcTimeOnlyConvertor::convert( data, precision ) ) {}
+  UtcTimeOnlyField( int field, int precision = 0 )
+: FieldBase( field, UtcTimeOnlyConvertor::convert( UtcTimeOnly(), precision ) ) {}
 
   void setValue( const UtcTimeOnly& value )
     { setString( UtcTimeOnlyConvertor::convert( value ) ); }
-  UtcTimeOnly getValue() const throw ( IncorrectDataFormat )
+  UtcTimeOnly getValue() const EXCEPT ( IncorrectDataFormat )
     { try
       { return UtcTimeOnlyConvertor::convert( getString() ); }
       catch( FieldConvertError& )
@@ -490,7 +531,7 @@ public:
 
   void setValue( int value )
     { setString( CheckSumConvertor::convert( value ) ); }
-  int getValue() const throw ( IncorrectDataFormat )
+  int getValue() const EXCEPT ( IncorrectDataFormat )
     { try
       { return CheckSumConvertor::convert( getString() ); }
       catch( FieldConvertError& )
@@ -539,9 +580,9 @@ DEFINE_FIELD_CLASS_NUM(NAME, TOK, TYPE, DEPRECATED_FIELD::NAME)
 #define DEFINE_FIELD_TIMECLASS_NUM( NAME, TOK, TYPE, NUM ) \
 class NAME : public TOK##Field { public: \
 NAME() : TOK##Field(NUM, false) {} \
-NAME(bool showMilliseconds) : TOK##Field(NUM, showMilliseconds) {} \
+NAME(int precision) : TOK##Field(NUM, precision) {} \
 NAME(const TYPE& value) : TOK##Field(NUM, value) {} \
-NAME(const TYPE& value, bool showMilliseconds) : TOK##Field(NUM, value, showMilliseconds) {} \
+NAME(const TYPE& value, int precision) : TOK##Field(NUM, value, precision) {} \
 }
 
 #define DEFINE_FIELD_TIMECLASS( NAME, TOK, TYPE ) \

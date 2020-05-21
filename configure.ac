@@ -9,6 +9,7 @@ m4_include([m4/ax_lib_mysql.m4])
 m4_include([m4/ax_lib_postgresql.m4])
 m4_include([m4/ax_lib_boost.m4])
 m4_include([m4/ax_lib_stlport.m4])
+m4_include([m4/ax_lib_ssl.m4])
 m4_include([m4/ax_allocator.m4])
 m4_include([m4/ax_python.m4])
 m4_include([m4/ax_ruby.m4])
@@ -31,10 +32,38 @@ AX_LIB_MYSQL()
 AX_LIB_POSTGRESQL()
 AX_LIB_BOOST()
 AX_LIB_STLPORT()
+AX_LIB_SSL()
 AX_ALLOCATOR()
 AX_PYTHON()
 AX_RUBY()
 AX_JAVA()
+
+########################################
+# Disable unit tests on Solaris, AIX
+
+AC_CANONICAL_HOST
+
+build_no_unit_test = no
+
+# Detect the target system
+case "${host_os}" in
+    *sunos*)
+        build_no_unit_test=yes
+        ;;
+    *solaris*)
+        build_no_unit_test=yes
+        ;;
+    *aix*)
+        build_no_unit_test=yes
+        ;;
+    *)
+        ;;
+esac
+
+# Pass the conditionals to automake
+AM_CONDITIONAL([NO_UNIT_TEST], [test "$build_no_unit_test" = "yes"])
+
+########################################
 
 ########################################
 # TBB 
@@ -78,17 +107,26 @@ fi
 ########################################
 
 # libs
-LIBS="$STLPORT_LIBS $XML_LIBS $MYSQL_LIBS $POSTGRESQL_LDFLAGS $TBB_LIBS $LIBS"
+LIBS="$OPENSSL_LIBS $STLPORT_LIBS $XML_LIBS $MYSQL_LIBS $POSTGRESQL_LDFLAGS $TBB_LIBS $LIBS"
 # gcc flags
 if test `uname` == SunOS; then
-   	SHAREDFLAGS="$TBB_CFLAGS $BOOST_CFLAGS $STLPORT_CFLAGS $MYSQL_CFLAGS $POSTGRESQL_CFLAGS $XML_CPPFLAGS $XML_CFLAGS $JAVA_CFLAGS $PYTHON_CFLAGS $RUBY_CFLAGS"
+   	SHAREDFLAGS="$TBB_CFLAGS $BOOST_CFLAGS $STLPORT_CFLAGS $MYSQL_CFLAGS $POSTGRESQL_CFLAGS $XML_CPPFLAGS $XML_CFLAGS $JAVA_CFLAGS $RUBY_CFLAGS"
 else
-	SHAREDFLAGS="-Wall -ansi -Wpointer-arith -Wwrite-strings -Wno-overloaded-virtual $TBB_CFLAGS $BOOST_CFLAGS $STLPORT_CFLAGS $MYSQL_CFLAGS $POSTGRESQL_CFLAGS $XML_CPPFLAGS $XML_CFLAGS $PYTHON_CFLAGS $RUBY_CFLAGS"
+  if test `uname` == AIX; then
+   	SHAREDFLAGS="$TBB_CFLAGS $BOOST_CFLAGS $STLPORT_CFLAGS $MYSQL_CFLAGS $POSTGRESQL_CFLAGS $XML_CPPFLAGS $XML_CFLAGS $JAVA_CFLAGS $PYTHON_CFLAGS $RUBY_CFLAGS"
+  else
+    SHAREDFLAGS="-Wall -ansi -Wno-unused-command-line-argument -Wpointer-arith -Wwrite-strings -Wno-overloaded-virtual -Wno-deprecated-declarations -Wno-deprecated $TBB_CFLAGS $BOOST_CFLAGS $STLPORT_CFLAGS $MYSQL_CFLAGS $POSTGRESQL_CFLAGS $XML_CPPFLAGS $XML_CFLAGS $PYTHON_CFLAGS $RUBY_CFLAGS"
+  fi
 fi
 
 CFLAGS="$CFLAGS $SHAREDFLAGS"
 AC_SUBST(CFLAGS)
+
+if test "x$NO_MODERN_CPP" != "x"; then
+CXXFLAGS="$CXXFLAGS $SHAREDFLAGS"
+else
 CXXFLAGS="$CXXFLAGS $SHAREDFLAGS -std=c++0x"
+fi
 AC_SUBST(CXXFLAGS)
 
 
@@ -97,6 +135,10 @@ AC_CHECK_LIB(c,shutdown,true,AC_CHECK_LIB(socket,shutdown))
 AC_CHECK_LIB(c,inet_addr,true,AC_CHECK_LIB(nsl,inet_addr))
 AC_CHECK_LIB(c,nanosleep,true,AC_CHECK_LIB(rt,nanosleep))
 AC_CHECK_LIB(compat,ftime)
+AC_CHECK_FUNC([clock_gettime], [AC_DEFINE([HAVE_CLOCK_GETTIME], [1],
+                               [Define if clock_gettime exists.])])
+AC_CHECK_FUNC([clock_get_time], [AC_DEFINE([__MACH__], [1],
+                               [Define if clock_get_time exists.])])
 
 AC_MSG_CHECKING([which threading environment to use])
 # each host OS needs special threading flags
@@ -187,12 +229,6 @@ else AC_MSG_RESULT(no)
     AC_MSG_ERROR(unable to find set_terminate in std or global namespace))
 fi
 
-AC_MSG_CHECKING(for typeinfo in the global namespace)
-AC_TRY_COMPILE(
-	[#include <typeinfo>],
-	[const typeinfo& ty = typeid(typeinfo);],
-	typeinfo_is_global=true, typeinfo_is_global=false)
-
 AC_MSG_CHECKING(for std::tr1::shared_ptr)
 AC_TRY_COMPILE(
 	[#include <tr1/memory>],
@@ -210,6 +246,21 @@ AC_TRY_COMPILE(
 	AC_DEFINE(HAVE_STD_SHARED_PTR, 1,
 	The system supports std::shared_ptr),
 	AC_MSG_RESULT(no))
+
+AC_MSG_CHECKING(for boost::shared_ptr)
+AC_TRY_COMPILE(
+        [#include <boost/shared_ptr.hpp>],
+        [boost::shared_ptr<int> ptr;],
+        AC_MSG_RESULT(yes)
+        AC_DEFINE(HAVE_BOOST_SHARED_PTR, 1,
+        The system supports boost::shared_ptr),
+        AC_MSG_RESULT(no))
+
+AC_MSG_CHECKING(for typeinfo in the global namespace)
+AC_TRY_COMPILE(
+	[#include <typeinfo>],
+	[const typeinfo& ty = typeid(typeinfo);],
+	typeinfo_is_global=true, typeinfo_is_global=false)
 
 if test $typeinfo_is_global = true
 then AC_MSG_RESULT(yes)
@@ -278,7 +329,8 @@ AC_CONFIG_FILES([
     src/Makefile
     src/C++/Makefile
     src/C++/test/Makefile
-    src/python/Makefile
+    src/python2/Makefile
+    src/python3/Makefile
     src/ruby/Makefile
     bin/Makefile
     bin/cfg/Makefile

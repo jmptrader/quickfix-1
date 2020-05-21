@@ -37,32 +37,32 @@ class SocketInitiator : public Initiator, SocketConnector::Strategy
 {
 public:
   SocketInitiator( Application&, MessageStoreFactory&,
-                   const SessionSettings& ) throw( ConfigError );
+                   const SessionSettings& ) EXCEPT ( ConfigError );
   SocketInitiator( Application&, MessageStoreFactory&,
-                   const SessionSettings&, LogFactory& ) throw( ConfigError );
+                   const SessionSettings&, LogFactory& ) EXCEPT ( ConfigError );
 
   virtual ~SocketInitiator();
 
 private:
-  typedef std::map < int, SocketConnection* > SocketConnections;
+  typedef std::map < socket_handle, SocketConnection* > SocketConnections;
   typedef std::map < SessionID, int > SessionToHostNum;
 
-  void onConfigure( const SessionSettings& ) throw ( ConfigError );
-  void onInitialize( const SessionSettings& ) throw ( RuntimeError );
+  void onConfigure( const SessionSettings& ) EXCEPT ( ConfigError );
+  void onInitialize( const SessionSettings& ) EXCEPT ( RuntimeError );
 
   void onStart();
   bool onPoll( double timeout );
   void onStop();
 
   void doConnect( const SessionID&, const Dictionary& d );
-  void onConnect( SocketConnector&, int );
-  void onWrite( SocketConnector&, int );
-  bool onData( SocketConnector&, int );
-  void onDisconnect( SocketConnector&, int );
+  void onConnect( SocketConnector&, socket_handle);
+  void onWrite( SocketConnector&, socket_handle);
+  bool onData( SocketConnector&, socket_handle);
+  void onDisconnect( SocketConnector&, socket_handle);
   void onError( SocketConnector& );
   void onTimeout( SocketConnector& );
 
-  void getHost( const SessionID&, const Dictionary&, std::string&, short& );
+  void getHost( const SessionID&, const Dictionary&, std::string&, short&, std::string&, short& );
 
   SessionSettings m_settings;
   SessionToHostNum m_sessionToHostNum;

@@ -45,31 +45,68 @@ namespace FIX
  */
 class FieldMap
 {
-public:
-#if defined(_MSC_VER) && _MSC_VER < 1300
-  typedef std::multimap < int, FieldBase, message_order > Fields;
-  typedef std::map < int, std::vector < FieldMap* >, std::less<int> > Groups;
-#else
-  typedef std::multimap < int, FieldBase, message_order, 
-                          ALLOCATOR<std::pair<const int,FieldBase> > > Fields;
-  typedef std::map < int, std::vector < FieldMap* >, std::less<int>, 
-                     ALLOCATOR<std::pair<const int, std::vector< FieldMap* > > > > Groups;
-#endif
 
-  typedef Fields::const_iterator iterator;
-  typedef iterator const_iterator;
-  typedef Groups::const_iterator g_iterator;
+  class sorter
+  {
+  public:
+    explicit sorter( const message_order& order ) : m_order( order ) {}
+
+    bool operator()( int tag, const FieldBase& right ) const
+    {
+      return m_order( tag, right.getTag() );
+    }
+
+    bool operator()( const FieldBase& left, int tag ) const
+    {
+      return m_order( left.getTag(), tag );
+    }
+
+    bool operator()( const FieldBase& left, const FieldBase& right ) const
+    {
+      return m_order( left.getTag(), right.getTag() );
+    }
+
+  private:
+    const message_order& m_order;
+  };
+
+  class finder
+  {
+  public:
+    explicit finder( int tag ) : m_tag( tag ) {}
+
+    bool operator()( const FieldBase& field ) const
+    {
+      return m_tag == field.getTag();
+    }
+
+  private:
+    int m_tag;
+  };
+
+  enum { DEFAULT_SIZE = 16 };
+
+protected:
+
+  FieldMap( const message_order& order, int size );
+
+public:
+
+  typedef std::vector < FieldBase, ALLOCATOR< FieldBase > > Fields;
+  typedef std::map < int, std::vector < FieldMap* >, std::less<int>,
+                     ALLOCATOR<std::pair<const int, std::vector< FieldMap* > > > > Groups;
+
+  typedef Fields::iterator iterator;
+  typedef Fields::const_iterator const_iterator;
+  typedef Groups::iterator g_iterator;
   typedef Groups::const_iterator g_const_iterator;
 
   FieldMap( const message_order& order =
-            message_order( message_order::normal ) )
-  : m_fields( order ) {}
+            message_order( message_order::normal ) );
 
-  FieldMap( const int order[] )
-  : m_fields( message_order(order) ) {}
+  FieldMap( const int order[] );
 
-  FieldMap( const FieldMap& copy )
-  { *this = copy; }
+  FieldMap( const FieldMap& copy );
 
   virtual ~FieldMap();
 
@@ -77,22 +114,29 @@ public:
 
   /// Set a field without type checking
   void setField( const FieldBase& field, bool overwrite = true )
-  throw( RepeatedTag )
+  EXCEPT ( RepeatedTag )
   {
-      if(!overwrite)
-          m_fields.insert( Fields::value_type( field.getTag(), field ) );
+    if( !overwrite )
+    {
+      addField( field );
+    }
+    else
+    {
+      Fields::iterator i = findTag( field.getTag() );
+      if( i == m_fields.end() )
+      {
+        addField( field );
+      }
       else
       {
-          Fields::iterator i = m_fields.find( field.getTag() );
-          if( i == m_fields.end() )
-              m_fields.insert( Fields::value_type( field.getTag(), field ) );
-          else
-              i->second = field;
+        i->setString( field.getString() );
       }
+    }
   }
+
   /// Set a field without a field class
   void setField( int tag, const std::string& value )
-  throw( RepeatedTag, NoTagValue )
+  EXCEPT ( RepeatedTag, NoTagValue )
   {
     FieldBase fieldBase( tag, value );
     setField( fieldBase );
@@ -101,16 +145,16 @@ public:
   /// Get a field if set
   bool getFieldIfSet( FieldBase& field ) const
   {
-    Fields::const_iterator iter = m_fields.find( field.getTag() );
+    Fields::const_iterator iter = findTag( field.getTag() );
     if ( iter == m_fields.end() )
       return false;
-    field = iter->second;
+    field = (*iter);
     return true;
   }
 
   /// Get a field without type checking
   FieldBase& getField( FieldBase& field )
-  const throw( FieldNotFound )
+  const EXCEPT ( FieldNotFound )
   {
     field = getFieldRef( field.getTag() );
     return field;
@@ -118,24 +162,24 @@ public:
 
   /// Get a field without a field class
   const std::string& getField( int tag )
-  const throw( FieldNotFound )
+  const EXCEPT ( FieldNotFound )
   {
     return getFieldRef( tag ).getString();
   }
 
   /// Get direct access to a field through a reference
   const FieldBase& getFieldRef( int tag )
-  const throw( FieldNotFound )
+  const EXCEPT ( FieldNotFound )
   {
-    Fields::const_iterator iter = m_fields.find( tag );
+    Fields::const_iterator iter = findTag( tag );
     if ( iter == m_fields.end() )
       throw FieldNotFound( tag );
-    return iter->second;
+    return (*iter);
   }
 
   /// Get direct access to a field through a pointer
   const FieldBase* const getFieldPtr( int tag )
-  const throw( FieldNotFound )
+  const EXCEPT ( FieldNotFound )
   {
     return &getFieldRef( tag );
   }
@@ -145,7 +189,7 @@ public:
   { return isSetField( field.getTag() ); }
   /// Check to see if a field is set by referencing its number
   bool isSetField( int tag ) const
-  { return m_fields.find( tag ) != m_fields.end(); }
+  { return findTag( tag ) != m_fields.end(); }
 
   /// Remove a field. If field is not present, this is a no-op.
   void removeField( int tag );
@@ -161,14 +205,14 @@ public:
 
   /// Get a specific instance of a group.
   FieldMap& getGroup( int num, int tag, FieldMap& group ) const
-  throw( FieldNotFound )
+  EXCEPT ( FieldNotFound )
   {
     return group = getGroupRef( num, tag );
   }
 
   /// Get direct access to a field through a reference
   FieldMap& getGroupRef( int num, int tag ) const
-  throw( FieldNotFound )
+  EXCEPT ( FieldNotFound )
   {
     Groups::const_iterator i = m_groups.find( tag );
     if( i == m_groups.end() ) throw FieldNotFound( tag );
@@ -179,7 +223,7 @@ public:
 
   /// Get direct access to a field through a pointer
   FieldMap* getGroupPtr( int num, int tag ) const
-  throw( FieldNotFound )
+  EXCEPT ( FieldNotFound )
   {
     return &getGroupRef( num, tag );
   }
@@ -211,14 +255,108 @@ public:
 
   int calculateTotal( int checkSumField = FIELD::CheckSum ) const;
 
-  iterator begin() const { return m_fields.begin(); }
-  iterator end() const { return m_fields.end(); }
-  g_iterator g_begin() const { return m_groups.begin(); }
-  g_iterator g_end() const { return m_groups.end(); }
+  iterator begin() { return m_fields.begin(); }
+  iterator end() { return m_fields.end(); }
+  const_iterator begin() const { return m_fields.begin(); }
+  const_iterator end() const { return m_fields.end(); }
+  g_iterator g_begin() { return m_groups.begin(); }
+  g_iterator g_end() { return m_groups.end(); }
+  g_const_iterator g_begin() const { return m_groups.begin(); }
+  g_const_iterator g_end() const { return m_groups.end(); }
+
+protected:
+
+  friend class Message;
+
+  void addField( const FieldBase& field )
+  {
+    Fields::iterator iter = findPositionFor( field.getTag() );
+    if( iter == m_fields.end() )
+    {
+      m_fields.push_back( field );
+    }
+    else
+    {
+      m_fields.insert( iter, field );
+    }
+  }
+
+  // used to find data length fields during message decoding
+  // message fields are not yet sorted so regular find*** functions might return wrong results
+  const FieldBase& reverse_find( int tag ) const
+  {
+    Fields::const_reverse_iterator iter = std::find_if( m_fields.rbegin(), m_fields.rend(), finder( tag ) );
+    if( iter == m_fields.rend() )
+      throw FieldNotFound( tag );
+
+    return *iter;
+  }
+
+  // append field to message without sorting
+  // only applicable during message decoding
+  void appendField( const FieldBase& field )
+  {
+    m_fields.push_back( field );
+  }
+
+  // sort fields after message decoding
+  void sortFields()
+  {
+    std::sort( m_fields.begin(), m_fields.end(), sorter(m_order) );
+  }
 
 private:
+
+  Fields::const_iterator findTag( int tag ) const
+  {
+    return lookup( m_fields.begin(), m_fields.end(), tag );
+  }
+
+  Fields::iterator findTag( int tag )
+  {
+    return lookup( m_fields.begin(), m_fields.end(), tag );
+  }
+
+  template <typename Iterator>
+  Iterator lookup(Iterator begin, Iterator end, int tag) const
+  {
+#if defined(__SUNPRO_CC)
+    std::size_t numElements;
+    std::distance( begin, end, numElements );
+#else
+    std::size_t numElements = std::distance( begin, end );
+#endif
+    if( numElements < 16 )
+      return std::find_if( begin, end, finder( tag ) );
+
+    Iterator iter = std::lower_bound( begin, end, tag, sorter( m_order ) );
+    if( iter != end &&
+        iter->getTag() == tag )
+    {
+      return iter;
+    }
+
+    return end;
+  }
+
+  Fields::iterator findPositionFor( int tag )
+  {
+    if( m_fields.empty() )
+      return m_fields.end();
+
+    const FieldBase& last = m_fields.back();
+    if( m_order( last.getTag(), tag ) ||
+        last.getTag() == tag )
+    {
+      return m_fields.end();
+    }
+
+    return std::upper_bound( m_fields.begin(), m_fields.end(), tag, sorter( m_order ) );
+  }
+
   Fields m_fields;
   Groups m_groups;
+  message_order m_order;
 };
 /*! @} */
 }

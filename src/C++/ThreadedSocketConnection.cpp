@@ -32,7 +32,7 @@
 namespace FIX
 {
 ThreadedSocketConnection::ThreadedSocketConnection
-( int s, Sessions sessions, Log* pLog )
+(socket_handle s, Sessions sessions, Log* pLog )
 : m_socket( s ), m_pLog( pLog ),
   m_sessions( sessions ), m_pSession( 0 ),
   m_disconnect( false )
@@ -42,10 +42,12 @@ ThreadedSocketConnection::ThreadedSocketConnection
 }
 
 ThreadedSocketConnection::ThreadedSocketConnection
-( const SessionID& sessionID, int s,
+( const SessionID& sessionID, socket_handle s,
   const std::string& address, short port, 
-  Log* pLog )
+  Log* pLog,
+  const std::string& sourceAddress, short sourcePort )
   : m_socket( s ), m_address( address ), m_port( port ),
+    m_sourceAddress( sourceAddress ), m_sourcePort( sourcePort ),
     m_pLog( pLog ),
     m_pSession( Session::lookupSession( sessionID ) ),
     m_disconnect( false )
@@ -79,6 +81,10 @@ bool ThreadedSocketConnection::send( const std::string& msg )
 
 bool ThreadedSocketConnection::connect()
 {
+  // do the bind in the thread as name resolution may block
+  if ( !m_sourceAddress.empty() || m_sourcePort )
+    socket_bind( m_socket, m_sourceAddress.c_str(), m_sourcePort );
+
   return socket_connect(getSocket(), m_address.c_str(), m_port) >= 0;
 }
 
@@ -101,7 +107,7 @@ bool ThreadedSocketConnection::read()
     if( result > 0 ) // Something to read
     {
       // We can read without blocking
-      ssize_t size = recv( m_socket, m_buffer, sizeof(m_buffer), 0 );
+      ssize_t size = socket_recv( m_socket, m_buffer, sizeof(m_buffer) );
       if ( size <= 0 ) { throw SocketRecvFailed( size ); }
       m_parser.addToStream( m_buffer, size );
     }
@@ -137,7 +143,7 @@ bool ThreadedSocketConnection::read()
 }
 
 bool ThreadedSocketConnection::readMessage( std::string& msg )
-throw( SocketRecvFailed )
+EXCEPT ( SocketRecvFailed )
 {
   try
   {
